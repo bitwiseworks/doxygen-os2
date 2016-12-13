@@ -96,7 +96,11 @@ int portable_system(const char *command,const char *args,bool commandHasConsole)
     argv[1] = "-c";
     argv[2] = fullCmd.data();
     argv[3] = 0;
+#ifdef __OS2__
+    execve("sh",(char * const *)argv,environ);
+#else
     execve("/bin/sh",(char * const *)argv,environ);
+#endif
     exit(127);
   }
   for (;;)
@@ -354,7 +358,7 @@ FILE *portable_fopen(const char *fileName,const char *mode)
 
 char  portable_pathSeparator()
 {
-#if defined(_WIN32) && !defined(__CYGWIN__)
+#if defined(_WIN32) && !defined(__CYGWIN__) || defined(__OS2__)
   return '\\';
 #else
   return '/';
@@ -363,7 +367,7 @@ char  portable_pathSeparator()
 
 char  portable_pathListSeparator()
 {
-#if defined(_WIN32) && !defined(__CYGWIN__)
+#if defined(_WIN32) && !defined(__CYGWIN__) || defined(__OS2__)
   return ';';
 #else
   return ':';
@@ -381,7 +385,7 @@ const char *portable_ghostScriptCommand()
 
 const char *portable_commandExtension()
 {
-#if defined(_WIN32) && !defined(__CYGWIN__)
+#if defined(_WIN32) && !defined(__CYGWIN__) || defined(__OS2__)
     return ".exe";
 #else
     return "";
@@ -390,7 +394,7 @@ const char *portable_commandExtension()
 
 bool portable_fileSystemIsCaseSensitive()
 {
-#if defined(_WIN32) || defined(macintosh) || defined(__MACOSX__) || defined(__APPLE__)
+#if defined(_WIN32) || defined(macintosh) || defined(__MACOSX__) || defined(__APPLE__) || defined(__OS2__)
   return FALSE;
 #else
   return TRUE;
@@ -433,7 +437,7 @@ void portable_sleep(int ms)
 
 bool portable_isAbsolutePath(const char *fileName)
 {
-# ifdef _WIN32
+# if defined(_WIN32) || defined(__OS2__)
   if (isalpha (fileName [0]) && fileName[1] == ':')
     fileName += 2;
 # endif
@@ -441,7 +445,7 @@ bool portable_isAbsolutePath(const char *fileName)
   if (fst == '/')  {
     return true;
   }
-# ifdef _WIN32
+# if defined(_WIN32) || defined(__OS2__)
   if (fst == '\\')
     return true;
 # endif

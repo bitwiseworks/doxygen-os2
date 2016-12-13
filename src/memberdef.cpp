@@ -17,7 +17,11 @@
 #include <qglobal.h>
 #include <qregexp.h>
 #include <assert.h>
+#ifdef __OS2__
+#include "../libmd5/md5.h"
+#else
 #include "md5.h"
+#endif
 #include "memberdef.h"
 #include "membername.h"
 #include "doxygen.h"

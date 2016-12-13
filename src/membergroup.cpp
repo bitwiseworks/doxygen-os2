@@ -28,7 +28,11 @@
 #include "docparser.h"
 #include "marshal.h"
 #include "entry.h"
+#ifdef __OS2__
+#include "../libmd5/md5.h"
+#else
 #include "md5.h"
+#endif
 
 //static QCString idToName(int id)
 //{

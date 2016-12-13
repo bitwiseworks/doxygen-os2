@@ -9493,7 +9493,7 @@ static QCString resolveSymlink(QCString path)
   QCString oldPrefix = "/";
   do
   {
-#ifdef WIN32
+#if defined(WIN32) || defined(__OS2__)
     // UNC path, skip server and share name
     if (sepPos==0 && (result.left(2)=="//" || result.left(2)=="\\\\"))
       sepPos = result.find('/',2);

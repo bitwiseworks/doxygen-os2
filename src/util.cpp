@@ -20,7 +20,11 @@
 #include <math.h>
 #include <limits.h>
 
+#ifdef __OS2__
+#include "../libmd5/md5.h"
+#else
 #include "md5.h"
+#endif
 
 #include <qregexp.h>
 #include <qfileinfo.h>
@@ -5091,7 +5095,7 @@ FileDef *findFileDef(const FileNameDict *fnDict,const char *n,bool &ambig)
     if (fn->count()==1)
     {
       FileDef *fd = fn->getFirst();
-#if defined(_WIN32) || defined(__MACOSX__) // Windows or MacOSX
+#if defined(_WIN32) || defined(__MACOSX__) || defined(__OS2__)// Windows or MacOSX
       bool isSamePath = fd->getPath().right(path.length()).lower()==path.lower();
 #else // Unix
       bool isSamePath = fd->getPath().right(path.length())==path;
@@ -7894,7 +7898,7 @@ bool patternMatch(const QFileInfo &fi,const QStrList *patList)
         int i=pattern.find('=');
         if (i!=-1) pattern=pattern.left(i); // strip of the extension specific filter name
 
-#if defined(_WIN32) || defined(__MACOSX__) // Windows or MacOSX
+#if defined(_WIN32) || defined(__MACOSX__) || defined(__OS2__)// Windows or MacOSX
         QRegExp re(pattern,FALSE,TRUE); // case insensitive match 
 #else                // unix
         QRegExp re(pattern,TRUE,TRUE);  // case sensitive match

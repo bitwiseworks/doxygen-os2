@@ -68,6 +68,9 @@ set(CPACK_DMG_BACKGROUND_IMAGE  ${CMAKE_CURRENT_SOURCE_DIR}/doc/doxygen_logo.eps
 if(WIN32)
     set(CPACK_GENERATOR "ZIP;NSIS")
 
+elseif(OS2)
+    set(CPACK_GENERATOR "ZIP")
+
 elseif(APPLE)
     set(CPACK_GENERATOR       "ZIP;DragNDrop;PackageMaker;Bundle" )
     set(CPACK_SYSTEM_NAME     "OSX" )

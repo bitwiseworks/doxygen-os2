@@ -132,7 +132,9 @@ void QThread::start()
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_DETACHED);
+#ifndef _OS_OS2EMX_
     pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
+#endif
     if (d->stackSize>0)
     {
 #if defined(_POSIX_THREAD_ATTR_STACKSIZE) && (_POSIX_THREAD_ATTR_STACKSIZE-0>0)

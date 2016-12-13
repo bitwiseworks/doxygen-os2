@@ -29,7 +29,7 @@ qmutex.cpp
 qutfcodec.cpp
 )
 
-if (UNIX)
+if (UNIX OR OS2)
 list(APPEND qtools_src
 qfile_unix.cpp
 qdir_unix.cpp
