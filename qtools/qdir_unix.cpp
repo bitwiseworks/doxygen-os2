@@ -171,7 +171,14 @@ bool QDir::isRelativePath( const QString &path )
     int len = path.length();
     if ( len == 0 )
 	return TRUE;
+#ifndef _OS_OS2EMX_
     return path[0] != '/';
+#else
+    int p = 0;
+    if ( path[ 0 ].isLetter() && path[ 1 ] == ':' )
+      p = 2; // we have checked the first 2.
+    return ( ( path[ p ] != '/' ) && ( path[ p ] != '\\' ) );
+#endif
 }
 
 bool QDir::readDirEntries( const QString &nameFilter,
