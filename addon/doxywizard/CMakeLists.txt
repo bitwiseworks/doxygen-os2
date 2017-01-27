@@ -111,6 +111,14 @@ target_link_libraries(doxywizard
 ${QT_LIBRARIES} ${QT_QTMAIN_LIBRARY}
 )
 
+if(OS2)
+  set_target_properties(doxywizard PROPERTIES
+   OS2_DEF_VENDOR "$ENV{VENDOR}"
+   OS2_DEF_PATCH "0"
+   OS2_DEF_VERSION "${VERSION}"
+   OS2_DEF_EXEType "WINDOWAPI")
+endif(OS2)
+
 install(TARGETS doxywizard DESTINATION bin)
 
 endif()
