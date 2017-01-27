@@ -259,8 +259,8 @@ target_link_libraries(doxygen
 
 if(OS2)
   set_target_properties(doxygen PROPERTIES
-   OS2_DEF_VENDOR_BLDLevel "$ENV{VENDOR}"
-   OS2_DEF_PATCH_BLDLevel "0"
+   OS2_DEF_VENDOR "$ENV{VENDOR}"
+   OS2_DEF_PATCH "0"
    OS2_DEF_VERSION "${VERSION}")
 endif(OS2)
 
