@@ -116,16 +116,19 @@ static int           g_memCallContext;
 static int	     g_lastCContext;
 static int           g_skipInlineInitContext;
 
+static bool          g_insideCpp;
 static bool          g_insideObjC;
 static bool          g_insideJava;
 static bool          g_insideCS;
 static bool          g_insidePHP;
 static bool          g_insideProtocolList;
+static bool          g_insideSlice;
 
 static bool          g_lexInit = FALSE;
 
 static QStack<int>   g_classScopeLengthStack;
 
+static int           g_prefixed_with_this_keyword = FALSE;
 static Definition   *g_searchCtx;
 static bool          g_collectXRefs;
 
@@ -903,7 +906,7 @@ static bool getLinkInScope(const QCString &c,  // scope
         return TRUE;
       }
     }
-    else // found member, but is is not linkable, so make sure content inside is not assign
+    else // found member, but it is not linkable, so make sure content inside is not assigned
          // to the previous member, see bug762760
     {
       DBG_CTX((stderr,"unlinkable member %s\n",md->name().data()));
@@ -963,7 +966,7 @@ static void generateClassOrGlobalLink(CodeOutputInterface &ol,const char *clName
   bool isLocal=FALSE;
 
   //printf("generateClassOrGlobalLink(className=%s)\n",className.data());
-  if ((lcd=g_theVarContext.findVariable(className))==0) // not a local variable
+  if (!g_prefixed_with_this_keyword || (lcd=g_theVarContext.findVariable(className))==0) // not a local variable
   {
     Definition *d = g_currentDefinition;
     //printf("d=%s g_sourceFileDef=%s\n",d?d->name().data():"<none>",g_sourceFileDef?g_sourceFileDef->name().data():"<none>");
@@ -981,7 +984,7 @@ static void generateClassOrGlobalLink(CodeOutputInterface &ol,const char *clName
       }
     }
     NamespaceDef *nd = getResolvedNamespace(className);
-    if (nd)
+    if (nd && nd->isLinkableInProject())
     {
       g_theCallContext.setScope(nd);
       addToSearchIndex(className);
@@ -1019,6 +1022,8 @@ static void generateClassOrGlobalLink(CodeOutputInterface &ol,const char *clName
     isLocal=TRUE;
     DBG_CTX((stderr,"is a local variable cd=%p!\n",cd));
   }
+  g_prefixed_with_this_keyword = FALSE; // discard the "this" prefix for the next calls
+
   if (cd && cd->isLinkable()) // is it a linkable class
   {
     DBG_CTX((stderr,"is linkable class %s\n",clName));
@@ -1320,7 +1325,9 @@ static void generateFunctionLink(CodeOutputInterface &ol,const char *funcName)
   //CodeClassDef *ccd=0;
   ClassDef *ccd=0;
   QCString locScope=g_classScope;
-  QCString locFunc=removeRedundantWhiteSpace(funcName);
+  QString qq=removeRedundantWhiteSpace(funcName);
+  if (g_insidePHP && qq.startsWith("self::")) qq=qq.mid(4);
+  QCString locFunc(qq.data());
   QCString funcScope;
   QCString funcWithScope=locFunc;
   QCString funcWithFullScope=locFunc;
@@ -1793,6 +1800,11 @@ static QCString escapeComment(const char *s)
   return result;
 }
 
+static bool skipLanguageSpecificKeyword(const QCString &kw)
+{
+  return g_insideCpp && (kw == "remove" || kw == "set" || kw == "get");
+}
+
 /* -----------------------------------------------------------------
  */
 #undef	YY_INPUT
@@ -1820,9 +1832,11 @@ TEMPLIST "<"[^\"\}\{\(\)\/\n\>]*">"
 SCOPETNAME (((({ID}{TEMPLIST}?){BN}*)?{SEP}{BN}*)*)((~{BN}*)?{ID})
 SCOPEPREFIX ({ID}{TEMPLIST}?{BN}*{SEP}{BN}*)+
 KEYWORD_OBJC ("@public"|"@private"|"@protected"|"@class"|"@implementation"|"@interface"|"@end"|"@selector"|"@protocol"|"@optional"|"@required"|"@throw"|"@synthesize"|"@property")
-KEYWORD ("asm"|"__assume"|"auto"|"class"|"const"|"delete"|"enum"|"explicit"|"extern"|"false"|"friend"|"gcnew"|"gcroot"|"set"|"get"|"inline"|"internal"|"mutable"|"namespace"|"new"|"nullptr"|"override"|"operator"|"pin_ptr"|"private"|"protected"|"public"|"raise"|"register"|"remove"|"self"|"sizeof"|"static"|"struct"|"__super"|"function"|"template"|"generic"|"this"|"true"|"typedef"|"typeid"|"typename"|"union"|"using"|"virtual"|"volatile"|"abstract"|"final"|"import"|"synchronized"|"transient"|"alignas"|"alignof"|{KEYWORD_OBJC})
-FLOWKW  ("break"|"case"|"catch"|"continue"|"default"|"do"|"else"|"finally"|"for"|"foreach"|"for each"|"goto"|"if"|"return"|"switch"|"throw"|"throws"|"try"|"while"|"@try"|"@catch"|"@finally")
-TYPEKW  ("bool"|"char"|"double"|"float"|"int"|"long"|"object"|"short"|"signed"|"unsigned"|"void"|"wchar_t"|"size_t"|"boolean"|"id"|"SEL"|"string"|"nullptr")
+KEYWORD ("asm"|"__assume"|"auto"|"class"|"const"|"delete"|"enum"|"explicit"|"extern"|"false"|"friend"|"gcnew"|"gcroot"|"set"|"get"|"inline"|"internal"|"mutable"|"namespace"|"new"|"null"|"nullptr"|"override"|"operator"|"pin_ptr"|"private"|"protected"|"public"|"raise"|"register"|"remove"|"self"|"sizeof"|"static"|"struct"|"__super"|"function"|"template"|"generic"|"this"|"true"|"typedef"|"typeid"|"typename"|"union"|"using"|"virtual"|"volatile"|"abstract"|"final"|"import"|"synchronized"|"transient"|"alignas"|"alignof"|{KEYWORD_OBJC})
+FLOWKW  ("break"|"catch"|"continue"|"default"|"do"|"else"|"finally"|"return"|"switch"|"throw"|"throws"|"@catch"|"@finally")
+FLOWCONDITION  ("case"|"for"|"foreach"|"for each"|"goto"|"if"|"try"|"while"|"@try")
+TYPEKW  ("bool"|"byte"|"char"|"double"|"float"|"int"|"long"|"object"|"short"|"signed"|"unsigned"|"void"|"wchar_t"|"size_t"|"boolean"|"id"|"SEL"|"string"|"nullptr")
+TYPEKWSL ("LocalObject"|"Object"|"Value")
 CASTKW ("const_cast"|"dynamic_cast"|"reinterpret_cast"|"static_cast")
 CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^' \\\n]{1,4}"'"))
 ARITHOP "+"|"-"|"/"|"*"|"%"|"--"|"++"
@@ -1943,7 +1957,6 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
   					  g_code->codify(yytext);
 					  if (*yytext=='{')
 					  {
-					    g_curlyCount++;
   					    if (g_searchingForBody)
 					    {
 					      g_searchingForBody=FALSE;
@@ -2066,11 +2079,6 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 <SkipCPP>"//"				{ 
   					  g_code->codify(yytext);
 					}
-<Body,FuncCall>"}"			{ 
-                                          g_theVarContext.popScope();
-					  g_yyColNr++;
-					  g_code->codify(yytext);
-					}
 <Body,FuncCall>"{"			{ 
                                           g_theVarContext.pushScope();
 
@@ -2083,7 +2091,6 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					    g_insideBody=TRUE;
 					  }
   					  g_code->codify(yytext);
-  					  g_curlyCount++;
 					  if (g_insideBody) 
 					  {
 					    g_bodyCurlyCount++;
@@ -2092,7 +2099,7 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					  g_name.resize(0);
 					  BEGIN( Body );
 					}
-<Body,MemberCall,MemberCall2>"}"	{ 
+<Body,FuncCall,MemberCall,MemberCall2>"}"  { 
                                           g_theVarContext.popScope();
   					  g_type.resize(0); 
 					  g_name.resize(0);
@@ -2167,8 +2174,12 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
   					  g_code->codify(yytext);
 					  endFontClass();
 					}
+<ClassName>{ID}("."{ID})*	        |
 <ClassName>{ID}("::"{ID})*	        {
-                                          g_curClassName=yytext;
+                                          if(g_insideCS)
+                                            g_curClassName=substitute(yytext,".","::");
+                                          else
+                                            g_curClassName=yytext;
 					  addType();
                                           if (g_curClassName=="alignas")
                                           {
@@ -2232,7 +2243,7 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					  unput(*yytext);
 					  BEGIN( Body );
   					}
-<ClassVar>("extends"|"implements")	{ // Java
+<ClassVar>("extends"|"implements")	{ // Java, Slice
   					  startFontClass("keyword");
   					  codifyLines(yytext);
 					  endFontClass();
@@ -2265,7 +2276,6 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 <Bases,ClassName,ClassVar,CppCliTypeModifierFollowup>{B}*"{"{B}* {
                                           g_theVarContext.pushScope();
   					  g_code->codify(yytext);
-					  g_curlyCount++;
 					  if (YY_START==ClassVar && g_curClassName.isEmpty())
 					  {
 					    g_curClassName = g_name.copy();
@@ -2416,8 +2426,11 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 <UsingName>\n				{ codifyLines(yytext); BEGIN(Body); }
 <UsingName>.				{ codifyLines(yytext); BEGIN(Body); }
 <Body,FuncCall>"$"?"this"("->"|".")	{ g_code->codify(yytext); // this-> for C++, this. for C#
+					  g_prefixed_with_this_keyword = TRUE;
                                         }
 <Body>{KEYWORD}/([^a-z_A-Z0-9]) 	{
+                                          if (g_insideJava && qstrcmp("internal",yytext) ==0) REJECT;
+                                          if (skipLanguageSpecificKeyword(yytext)) REJECT;
   					  startFontClass("keyword");
   					  codifyLines(yytext);
 					  if (QCString(yytext)=="typedef")
@@ -2428,11 +2441,13 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					  endFontClass();
   					}
 <Body>{KEYWORD}/{B}* 			{
+                                          if (skipLanguageSpecificKeyword(yytext)) REJECT;
   					  startFontClass("keyword");
   					  codifyLines(yytext);
 					  endFontClass();
   					}
 <Body>{KEYWORD}/{BN}*"(" 		{
+                                          if (skipLanguageSpecificKeyword(yytext)) REJECT;
   					  startFontClass("keyword");
   					  codifyLines(yytext);
 					  endFontClass();
@@ -2457,6 +2472,18 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					  g_inForEachExpression = (qstrcmp(yytext,"for each")==0 || qstrcmp(yytext, "foreach")==0);
 					  BEGIN(FuncCall);
   					}
+<Body>{FLOWCONDITION}/{BN}*"("          {
+                                          if (g_currentMemberDef && g_currentMemberDef->isFunction())
+                                          {
+                                            g_currentMemberDef->addFlowKeyWord();
+                                          }
+                                          startFontClass("keywordflow");
+                                          codifyLines(yytext);
+                                          endFontClass();
+                                          g_name.resize(0);g_type.resize(0);
+                                          g_inForEachExpression = (strcmp(yytext,"for each")==0 || strcmp(yytext, "foreach")==0);
+                                          BEGIN(FuncCall);
+                                        }
 <Body>{FLOWKW}/([^a-z_A-Z0-9]) 		{
   					  startFontClass("keywordflow");
   					  codifyLines(yytext);
@@ -2466,11 +2493,33 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					    g_inFunctionTryBlock=FALSE;
 					  }
   					}
+<Body>{FLOWCONDITION}/([^a-z_A-Z0-9]) 	{
+                                          if (g_currentMemberDef && g_currentMemberDef->isFunction())
+                                          {
+                                            g_currentMemberDef->addFlowKeyWord();
+                                          }
+                                          startFontClass("keywordflow");
+                                          codifyLines(yytext);
+                                          endFontClass();
+                                          if (g_inFunctionTryBlock && (strcmp(yytext,"catch")==0 || strcmp(yytext,"finally")==0))
+                                          {
+                                            g_inFunctionTryBlock=FALSE;
+                                          }
+                                        }
 <Body>{FLOWKW}/{B}* 			{
   					  startFontClass("keywordflow");
   					  codifyLines(yytext);
 					  endFontClass();
   					}
+<Body>{FLOWCONDITION}/{B}*              {
+                                          if (g_currentMemberDef && g_currentMemberDef->isFunction())
+                                          {
+                                            g_currentMemberDef->addFlowKeyWord();
+                                          }
+                                          startFontClass("keywordflow");
+                                          codifyLines(yytext);
+                                          endFontClass();
+                                        }
 <Body>"*"{B}*")"                        { // end of cast?
   					  g_code->codify(yytext);
 					  g_theCallContext.popScope();
@@ -2494,6 +2543,20 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					  endFontClass();
 					  addType();
   					  g_name+=yytext; 
+  					}
+<Body,TemplDecl,ObjCMethod>{TYPEKWSL}/{B}* {
+                                          if (!g_insideSlice)
+                                          {
+                                            REJECT;
+                                          }
+                                          else
+                                          {
+  					    startFontClass("keywordtype");
+					    g_code->codify(yytext);
+					    endFontClass();
+					    addType();
+  					    g_name+=yytext; 
+                                          }
   					}
 <Body>"generic"/{B}*"<"[^\n\/\-\.\{\"\>]*">"{B}* {
   					  startFontClass("keyword");
@@ -2555,7 +2618,7 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					  generatePHPVariableLink(*g_code,yytext);
   					  g_name+=yytext+7; 
                                         }
-<Body,TemplCast>{SCOPENAME}{B}*"<"[^\n\/\-\.\{\"\>]*">"("::"{ID})*/{B}* { // A<T> *pt;
+<Body,TemplCast>{SCOPENAME}{B}*"<"[^\n\/\-\.\{\"\>\(]*">"("::"{ID})*/{B}* { // A<T> *pt;
 					  int i=QCString(yytext).find('<');
 					  QCString kw = QCString(yytext).left(i).stripWhiteSpace();
 					  if (kw.right(5)=="_cast" && YY_START==Body)
@@ -2586,6 +2649,7 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					  addType();
   					  g_name=varname; 
 					}
+<Body>{SCOPETNAME}{B}*"<"[^\n\/\-\.\{\"\>]*">"/{BN}*"(" |
 <Body>{SCOPETNAME}/{BN}*"("		{ // a() or c::a() or t<A,B>::a() or A\B\foo()
   					  addType();
 					  generateFunctionLink(*g_code,yytext);
@@ -2953,6 +3017,7 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 <MemberCall2,FuncCall>{KEYWORD}/([^a-z_A-Z0-9]) {
 					  //addParmType();
 					  //g_parmName=yytext; 
+                                          if (skipLanguageSpecificKeyword(yytext)) REJECT;
   					  startFontClass("keyword");
   					  g_code->codify(yytext);
 					  endFontClass();
@@ -2964,6 +3029,20 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
   					  g_code->codify(yytext);
 					  endFontClass();
 					}
+<MemberCall2,FuncCall,OldStyleArgs,TemplCast>{TYPEKWSL}/([^a-z_A-Z0-9]) {
+                                          if (!g_insideSlice)
+                                          {
+                                            REJECT;
+                                          }
+                                          else
+                                          {
+					    addParmType();
+					    g_parmName=yytext; 
+  					    startFontClass("keywordtype");
+  					    g_code->codify(yytext);
+					    endFontClass();
+                                          }
+					}
 <MemberCall2,FuncCall>{FLOWKW}/([^a-z_A-Z0-9]) {
 					  addParmType();
 					  g_parmName=yytext; 
@@ -2971,6 +3050,17 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
   					  g_code->codify(yytext);
 					  endFontClass();
 					}
+<MemberCall2,FuncCall>{FLOWCONDITION}/([^a-z_A-Z0-9]) {
+                                          if (g_currentMemberDef && g_currentMemberDef->isFunction())
+                                          {
+                                            g_currentMemberDef->addFlowKeyWord();
+                                          }
+                                          addParmType();
+                                          g_parmName=yytext;
+                                          startFontClass("keywordflow");
+                                          g_code->codify(yytext);
+                                          endFontClass();
+                                        }
 <MemberCall2,FuncCall>{ID}(({B}*"<"[^\n\[\](){}<>]*">")?({B}*"::"{B}*{ID})?)* {
 					  addParmType();
 					  g_parmName=yytext; 
@@ -3156,7 +3246,6 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					    g_insideBody=TRUE;
 					  }
 					  if (g_insideBody) g_bodyCurlyCount++;
-					  g_curlyCount++;
   					  g_type.resize(0); g_name.resize(0);
 					  BEGIN( Body );
   					}
@@ -3211,7 +3300,6 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
   					}
 <SkipInits>"{"				{ 
   					  g_code->codify(yytext);
-					  g_curlyCount++; 
   					  if (g_searchingForBody)
 					  {
 					    g_searchingForBody=FALSE;
@@ -3527,6 +3615,9 @@ RAWEND    ")"[^ \t\(\)\\]{0,16}\"
 					    endFontClass();
 					  }
 					}
+<SkipComment>[^\*\n]+                   {
+                                          g_code->codify(yytext);
+                                        }
 <*>"/*"					{ 
 					  startFontClass("comment");
   					  g_code->codify(yytext);
@@ -3698,10 +3789,12 @@ void parseCCode(CodeOutputInterface &od,const char *className,const QCString &s,
     g_sourceFileDef = new FileDef("",(exName?exName:"generated"));
     cleanupSourceDef = TRUE;
   }
-  g_insideObjC = lang==SrcLangExt_ObjC;
-  g_insideJava = lang==SrcLangExt_Java;
-  g_insideCS   = lang==SrcLangExt_CSharp;
-  g_insidePHP  = lang==SrcLangExt_PHP;
+  g_insideObjC  = lang==SrcLangExt_ObjC;
+  g_insideJava  = lang==SrcLangExt_Java;
+  g_insideCS    = lang==SrcLangExt_CSharp;
+  g_insidePHP   = lang==SrcLangExt_PHP;
+  g_insideCpp   = lang==SrcLangExt_Cpp;
+  g_insideSlice = lang==SrcLangExt_Slice;
   if (g_sourceFileDef) 
   {
     setCurrentDoc("l00001");

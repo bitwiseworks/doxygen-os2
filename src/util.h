@@ -1,12 +1,12 @@
 /******************************************************************************
  *
- * 
+ *
  *
  * Copyright (C) 1997-2015 by Dimitri van Heesch.
  *
  * Permission to use, copy, modify, and distribute this software and its
- * documentation under the terms of the GNU General Public License is hereby 
- * granted. No representations are made about the suitability of this software 
+ * documentation under the terms of the GNU General Public License is hereby
+ * granted. No representations are made about the suitability of this software
  * for any purpose. It is provided "as is" without express or implied warranty.
  * See the GNU General Public License for more details.
  *
@@ -18,7 +18,7 @@
 #ifndef UTIL_H
 #define UTIL_H
 
-/*! \file 
+/*! \file
  *  \brief A bunch of utility functions.
  */
 
@@ -27,6 +27,7 @@
 #include "types.h"
 #include "sortdict.h"
 #include "docparser.h"
+#include "classdef.h"
 
 //--------------------------------------------------------------------
 
@@ -70,7 +71,7 @@ class TextGeneratorIntf
     virtual void writeBreak(int indent) const = 0;
     virtual void writeLink(const char *extRef,const char *file,
                       const char *anchor,const char *text
-                     ) const = 0; 
+                     ) const = 0;
 };
 
 /** Implements TextGeneratorIntf for an OutputDocInterface stream. */
@@ -122,9 +123,9 @@ QCString getLanguageSpecificSeparator(SrcLangExt lang,bool classScope=FALSE);
 //--------------------------------------------------------------------
 
 void linkifyText(const TextGeneratorIntf &ol,
-                 Definition *scope,
-                 FileDef *fileScope,
-                 Definition *self,
+                 const Definition *scope,
+                 const FileDef *fileScope,
+                 const Definition *self,
                  const char *text,
                  bool autoBreak=FALSE,
                  bool external=TRUE,
@@ -139,11 +140,11 @@ QCString fileToString(const char *name,bool filter=FALSE,bool isSourceCode=FALSE
 QCString dateToString(bool);
 
 bool getDefs(const QCString &scopeName,
-                    const QCString &memberName, 
-                    const char *, 
-                    MemberDef *&md, 
+                    const QCString &memberName,
+                    const char *,
+                    MemberDef *&md,
                     ClassDef *&cd,
-                    FileDef *&fd, 
+                    FileDef *&fd,
                     NamespaceDef *&nd,
                     GroupDef *&gd,
                     bool forceEmptyScope=FALSE,
@@ -194,6 +195,8 @@ void mergeArguments(ArgumentList *,ArgumentList *,bool forceNameOverwrite=FALSE)
 QCString substituteClassNames(const QCString &s);
 
 QCString substitute(const QCString &s,const QCString &src,const QCString &dst);
+QCString substitute(const QCString &s,const QCString &src,const QCString &dst,int skip_seq);
+QCString substitute(const QCString &s,char srcChar,char dstChar);
 
 QCString clearBlock(const char *s,const char *begin,const char *end);
 
@@ -203,8 +206,8 @@ QCString resolveDefines(const char *n);
 
 ClassDef *getClass(const char *key);
 
-ClassDef *getResolvedClass(Definition *scope,
-                           FileDef *fileScope,
+ClassDef *getResolvedClass(const Definition *scope,
+                           const FileDef *fileScope,
                            const char *key,
                            MemberDef **pTypeDef=0,
                            QCString *pTemplSpec=0,
@@ -259,7 +262,7 @@ void initClassHierarchy(ClassSDict *cl);
 
 bool hasVisibleRoot(BaseClassList *bcl);
 bool classHasVisibleChildren(ClassDef *cd);
-bool namespaceHasVisibleChild(NamespaceDef *nd,bool includeClasses);
+bool namespaceHasVisibleChild(NamespaceDef *nd,bool includeClasses,bool filterClasses,ClassDef::CompoundType ct);
 bool classVisibleInIndex(ClassDef *cd);
 
 int minClassDistance(const ClassDef *cd,const ClassDef *bcd,int level=0);
@@ -283,7 +286,9 @@ QCString convertToLaTeX(const QCString &s,bool insideTabbing=FALSE,bool keepSpac
 
 QCString convertToXML(const char *s);
 
-QCString convertToJSString(const char *s);
+QCString convertToDocBook(const char *s);
+
+QCString convertToJSString(const char *s, bool applyTextDir = true);
 
 QCString getOverloadDocs();
 
@@ -342,9 +347,10 @@ void filterLatexString(FTextStream &t,const char *str,
                        bool insideItem=FALSE,
                        bool keepSpaces=FALSE);
 
-QCString latexEscapeLabelName(const char *s,bool insideTabbing);
-QCString latexEscapeIndexChars(const char *s,bool insideTabbing);
+QCString latexEscapeLabelName(const char *s);
+QCString latexEscapeIndexChars(const char *s);
 QCString latexEscapePDFString(const char *s);
+QCString latexFilterURL(const char *s);
 
 QCString rtfFormatBmkStr(const char *name);
 
@@ -358,9 +364,9 @@ QCString stripExtension(const char *fName);
 
 void replaceNamespaceAliases(QCString &scope,int i);
 
-int isAccessibleFrom(Definition *scope,FileDef *fileScope,Definition *item);
+int isAccessibleFrom(const Definition *scope,const FileDef *fileScope,const Definition *item);
 
-int isAccessibleFromWithExpScope(Definition *scope,FileDef *fileScope,Definition *item,
+int isAccessibleFromWithExpScope(const Definition *scope,const FileDef *fileScope,const Definition *item,
                      const QCString &explicitScopePart);
 
 int computeQualifiedIndex(const QCString &name);
@@ -384,15 +390,15 @@ QCString stripLeadingAndTrailingEmptyLines(const QCString &s,int &docLine);
 //                         const QCString &anchor="");
 
 bool updateLanguageMapping(const QCString &extension,const QCString &parser);
-SrcLangExt getLanguageFromFileName(const QCString fileName);
+SrcLangExt getLanguageFromFileName(const QCString& fileName);
 void initDefaultExtensionMapping();
 void addCodeOnlyMappings();
 
-MemberDef *getMemberFromSymbol(Definition *scope,FileDef *fileScope, 
+MemberDef *getMemberFromSymbol(Definition *scope,FileDef *fileScope,
                                 const char *n);
 bool checkIfTypedef(Definition *scope,FileDef *fileScope,const char *n);
 
-ClassDef *newResolveTypedef(FileDef *fileScope,MemberDef *md,
+ClassDef *newResolveTypedef(const FileDef *fileScope,MemberDef *md,
                             MemberDef **pMemType=0,QCString *pTemplSpec=0,
                             QCString *pResolvedType=0,
                             ArgumentList *actTemplParams=0);
@@ -477,6 +483,10 @@ void convertProtectionLevel(
 bool mainPageHasTitle();
 bool openOutputFile(const char *outFile,QFile &f);
 void writeExtraLatexPackages(FTextStream &t);
+void writeLatexSpecialFormulaChars(FTextStream &t);
+
+int usedTableLevels();
+void incUsedTableLevels();
+void decUsedTableLevels();
 
 #endif
-

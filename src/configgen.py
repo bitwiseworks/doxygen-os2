@@ -63,7 +63,7 @@ def transformDocs(doc):
 	doc = re.sub('<a +href="([^"]*)" *>([^<]*)</a>', '\\2 (see: \\1)', doc)
 	# LaTeX name as formula -> LaTeX
 	doc = doc.replace("\\f$\\mbox{\\LaTeX}\\f$", "LaTeX")
-	# Other forula's (now just 2) so explicitely mentioned.
+	# Other formula's (now just 2) so explicitly mentioned.
 	doc = doc.replace("\\f$2^{(16+\\mbox{LOOKUP\\_CACHE\\_SIZE})}\\f$",
 					  "2^(16+LOOKUP_CACHE_SIZE)")
 	doc = doc.replace("\\f$2^{16} = 65536\\f$", "2^16=65536")
@@ -272,7 +272,7 @@ def parseOption(node):
 				print("              \"%s\"" % (line))
 		print("             );")
 		if defval != '':
-			print("  cs->setDefaultValue(\"%s\");" % (defval))
+			print("  cs->setDefaultValue(\"%s\");" % (defval.replace('\\','\\\\')))
 		if format == 'file':
 			print("  cs->setWidgetType(ConfigString::File);")
 		elif format == 'image':
@@ -529,7 +529,7 @@ def parseOptionDoc(node, first):
 				if defval != '':
 					print("")
 					print("The default value is: <code>%s</code>." % (
-						defval))
+						defval.replace('\\','\\\\')))
 			print("")
 		# depends handling
 		if (node.hasAttribute('depends')):

@@ -89,6 +89,8 @@ static int      g_lastBlockContext;
 static bool     g_pythonDocString;
 static int      g_nestingCount;
 
+static bool     g_vhdl; // for VHDL old style --! comment
+
 static SrcLangExt g_lang;
 static bool       isFixedForm; // For Fortran
 
@@ -250,7 +252,7 @@ void replaceComment(int offset);
 
 %%
 
-<Scan>[^"'!\/\n\\#-,]*              { /* eat anything that is not " / , or \n */ 
+<Scan>[^"'!\/\n\\#,\-]*             { /* eat anything that is not " / , or \n */
                                        copyToOutput(yytext,(int)yyleng);
                                     }
 <Scan>[,]                           { /* eat , so we have a nice separator in long initialization lines */ 
@@ -292,12 +294,12 @@ void replaceComment(int offset);
 				     }
 				     else
 				     {
-                                       /* check for fixed format; we might have some conditional as part of multilene if like C<5 .and. & */
+                                       /* check for fixed format; we might have some conditional as part of multiline if like C<5 .and. & */
                                        if (isFixedForm && (g_col == 0))
                                        {
                                          copyToOutput(yytext,(int)yyleng); 
                                          g_nestingCount=0;
-                                         g_commentStack.clear(); /*  to be on the save side */
+                                         g_commentStack.clear(); /* to be on the safe side */
 				         BEGIN(CComment);
                                          g_commentStack.push(new CommentCtx(g_lineNr));
 				       }
@@ -425,6 +427,7 @@ void replaceComment(int offset);
 				     }
 				     else
 				     {
+                                       g_vhdl = TRUE;
                                        copyToOutput(yytext,(int)yyleng); 
                                        g_nestingCount=0;
                                        g_commentStack.clear(); /*  to be on the save side */
@@ -588,7 +591,15 @@ void replaceComment(int offset);
                                      copyToOutput(yytext,(int)yyleng); 
                                    }
 <SkipString>\\.                    { /* escaped character in string */
-                                     copyToOutput(yytext,(int)yyleng); 
+                                     if (g_lang==SrcLangExt_Fortran)
+                                     {
+                                       unput(yytext[1]);
+                                       copyToOutput(yytext,1);
+                                     }
+                                     else
+                                     {
+                                       copyToOutput(yytext,(int)yyleng);
+                                     }
                                    }
 <SkipString>"\""       	           { /* end of string */ 
                                      copyToOutput(yytext,(int)yyleng); 
@@ -601,7 +612,15 @@ void replaceComment(int offset);
                                      copyToOutput(yytext,(int)yyleng); 
                                    }
 <SkipChar>\\.		           { /* escaped character */
-                                     copyToOutput(yytext,(int)yyleng); 
+                                     if (g_lang==SrcLangExt_Fortran)
+                                     {
+                                       unput(yytext[1]);
+                                       copyToOutput(yytext,1);
+                                     }
+                                     else
+                                     {
+                                       copyToOutput(yytext,(int)yyleng);
+                                     }
                                    }
 <SkipChar>'                        { /* end of character literal */ 
                                      copyToOutput(yytext,(int)yyleng); 
@@ -664,7 +683,27 @@ void replaceComment(int offset);
                                        }
 				     }
                                    }
-<CComment>"\n"/[ \t]*[^#]	   { /* end of Python comment */
+  /* Python an VHDL share CComment, so special attention for ending comments is required */
+<CComment>"\n"/[ \t]*"#" 	   {
+                                     if (g_lang!=SrcLangExt_VHDL)
+                                     {
+                                       REJECT;
+                                     }
+                                     else
+                                     {
+                                       if (g_vhdl) // inside --! comment
+                                       {
+                                         g_vhdl = FALSE;
+				         copyToOutput(yytext,(int)yyleng);
+				         BEGIN(Scan);
+                                       }
+                                       else // C-type comment
+                                       {
+                                         REJECT;
+                                       }
+                                     }
+                                   }
+<CComment>"\n"/[ \t]*"-" 	   {
                                      if (g_lang!=SrcLangExt_Python || g_pythonDocString)
 				     {
 				       REJECT;
@@ -674,18 +713,38 @@ void replaceComment(int offset);
 				       copyToOutput(yytext,(int)yyleng);
 				       BEGIN(Scan);
 				     }
-  				   }
-<CComment>"\n"/[ \t]*[^\-]	   { /* end of VHDL comment */
-                                     if (g_lang!=SrcLangExt_VHDL)
-				     {
+                                   }
+<CComment>"\n"/[ \t]*[^ \t#\-] 	   {
+                                     if (g_lang==SrcLangExt_Python)
+                                     {
+                                       if (g_pythonDocString)
+                                       {
+                                         REJECT;
+                                       }
+                                       else
+                                       {
+				         copyToOutput(yytext,(int)yyleng);
+				         BEGIN(Scan);
+                                       }
+                                     }
+                                     else if (g_lang==SrcLangExt_VHDL)
+                                     {
+                                       if (g_vhdl) // inside --! comment
+                                       {
+                                         g_vhdl = FALSE;
+				         copyToOutput(yytext,(int)yyleng);
+				         BEGIN(Scan);
+                                       }
+                                       else // C-type comment
+                                       {
+                                         REJECT;
+                                       }
+                                     }
+                                     else
+                                     {
 				       REJECT;
-				     }
-				     else
-				     {
-				       copyToOutput(yytext,(int)yyleng);
-				       BEGIN(Scan);
-				     }
-  				   }
+                                     }
+                                   }
    /* removed for bug 674842 (bug was introduced in rev 768)
 <CComment>"'"			   {
   			             g_charContext = YY_START;
@@ -1001,6 +1060,7 @@ void convertCppComments(BufStr *inBuf,BufStr *outBuf,const char *fileName)
   g_condStack.setAutoDelete(TRUE);
   g_commentStack.clear();
   g_commentStack.setAutoDelete(TRUE);
+  g_vhdl = FALSE;
 
   printlex(yy_flex_debug, TRUE, __FILE__, fileName);
   isFixedForm = FALSE;
@@ -1024,7 +1084,7 @@ void convertCppComments(BufStr *inBuf,BufStr *outBuf,const char *fileName)
   {
     CondCtx *ctx = g_condStack.pop();
     QCString sectionInfo = " ";
-    if (ctx->sectionId!=" ") sectionInfo.sprintf(" with label %s ",ctx->sectionId.data()); 
+    if (ctx->sectionId!=" ") sectionInfo.sprintf(" with label '%s' ",ctx->sectionId.stripWhiteSpace().data());
     warn(g_fileName,ctx->lineNr,"Conditional section%sdoes not have "
 	"a corresponding \\endcond command within this file.",sectionInfo.data());
   }
@@ -1049,7 +1109,9 @@ void convertCppComments(BufStr *inBuf,BufStr *outBuf,const char *fileName)
   if (Debug::isFlagSet(Debug::CommentCnv))
   {
     g_outBuf->at(g_outBuf->curPos())='\0';
-    msg("-------------\n%s\n-------------\n",g_outBuf->data());
+    Debug::print(Debug::CommentCnv,0,"-----------\nCommentCnv: %s\n"
+                 "output=[\n%s]\n-----------\n",fileName,g_outBuf->data()
+                );
   }
   printlex(yy_flex_debug, FALSE, __FILE__, fileName);
 }

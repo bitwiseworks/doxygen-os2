@@ -51,7 +51,7 @@ bool CondParser::parse(const char *fileName,int lineNr,const char *expr)
 
 #if 0
     // check for garbage at the end of the expression
-    // an expression ends with a character '\0' and token_type = delimeter
+    // an expression ends with a character '\0' and token_type = delimiter
     if (m_tokenType!=DELIMITER || !m_token.isEmpty())
     {
       if (m_tokenType == DELIMITER)
@@ -84,7 +84,7 @@ bool CondParser::parse(const char *fileName,int lineNr,const char *expr)
 
 
 /**
- * checks if the given char c is a delimeter
+ * checks if the given char c is a delimiter
  * minus is checked apart, can be unary minus
  */
 static bool isDelimiter(const char c)
@@ -100,9 +100,10 @@ static bool isAlpha(const char c)
   return (c>='A' && c<='Z') || (c>='a' && c<='z') || c=='_';
 }
 
-static bool isAlphaNum(const char c)
+static bool isAlphaNumSpec(const char c)
 {
-  return isAlpha(c) || (c>='0' && c<='9');
+  return isAlpha(c) || (c>='0' && c<='9') || c=='-' || c=='.' ||
+    (((unsigned char)c)>=0x80 && ((unsigned char)c)<=0xFF);
 }
 
 /**
@@ -155,7 +156,7 @@ void CondParser::getToken()
     return;
   }
 
-  // check for operators (delimeters)
+  // check for operators (delimiters)
   if (isDelimiter(*m_e))
   {
     m_tokenType = DELIMITER;
@@ -170,7 +171,7 @@ void CondParser::getToken()
   if (isAlpha(*m_e))
   {
     m_tokenType = VARIABLE;
-    while (isAlphaNum(*m_e))
+    while (isAlphaNumSpec(*m_e))
     {
       m_token += *m_e++;
     }
@@ -283,7 +284,7 @@ bool CondParser::parseVar()
 }
 
 /**
- * evaluate an operator for given valuess
+ * evaluate an operator for given values
  */
 bool CondParser::evalOperator(int opId, bool lhs, bool rhs)
 {

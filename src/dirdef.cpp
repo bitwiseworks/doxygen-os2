@@ -485,8 +485,14 @@ void DirDef::writeDocumentation(OutputList &ol)
       case LayoutDocEntry::NamespaceNestedNamespaces:
       case LayoutDocEntry::NamespaceNestedConstantGroups:
       case LayoutDocEntry::NamespaceClasses:
+      case LayoutDocEntry::NamespaceInterfaces:
+      case LayoutDocEntry::NamespaceStructs:
+      case LayoutDocEntry::NamespaceExceptions:
       case LayoutDocEntry::NamespaceInlineClasses:
       case LayoutDocEntry::FileClasses:
+      case LayoutDocEntry::FileInterfaces:
+      case LayoutDocEntry::FileStructs:
+      case LayoutDocEntry::FileExceptions:
       case LayoutDocEntry::FileNamespaces:
       case LayoutDocEntry::FileConstantGroups:
       case LayoutDocEntry::FileIncludes:
@@ -930,14 +936,14 @@ void buildDirectories()
     for (;(fd=fni.current());++fni)
     {
       //printf("buildDirectories %s\n",fd->name().data());
-      if (fd->getReference().isEmpty() && !fd->isDocumentationFile())
+      if (fd->getReference().isEmpty())
       {
         DirDef *dir;
         if ((dir=Doxygen::directories->find(fd->getPath()))==0) // new directory
         {
           dir = DirDef::mergeDirectoryInTree(fd->getPath());
         }
-        if (dir) dir->addFile(fd);
+        if (dir && !fd->isDocumentationFile()) dir->addFile(fd);
       }
       else
       {
@@ -998,7 +1004,13 @@ void generateDirDocs(OutputList &ol)
   DirSDict::Iterator sdi(*Doxygen::directories);
   for (sdi.toFirst();(dir=sdi.current());++sdi)
   {
+    ol.pushGeneratorState();
+    if (!dir->hasDocumentation())
+    {
+      ol.disableAllBut(OutputGenerator::Html);
+    }
     dir->writeDocumentation(ol);
+    ol.popGeneratorState();
   }
   if (Config_getBool(DIRECTORY_GRAPH))
   {

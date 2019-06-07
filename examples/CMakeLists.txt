@@ -1,7 +1,5 @@
-if (build_doc)
-
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/examples)
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/html/examples)
+file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/examples
+                    ${PROJECT_BINARY_DIR}/html/examples)
 file(GLOB EXAMPLE_FILES RELATIVE ${CMAKE_SOURCE_DIR}/examples "*")
 
 if (DOT)
@@ -165,8 +163,9 @@ add_custom_command(
 
 add_custom_command(
 	COMMAND ${EXECUTABLE_OUTPUT_PATH}/doxygen tag.cfg
+        COMMAND ${PYTHON_EXECUTABLE}  ${TOP}/examples/strip_example.py  < ${PROJECT_BINARY_DIR}/html/examples/tag/latex/refman.tex > ${PROJECT_BINARY_DIR}/html/examples/tag/latex/refman_doc.tex
 	DEPENDS doxygen tag.cpp tag.cfg ${PROJECT_BINARY_DIR}/html/examples/example/html/index.html ${TOP}/examples/strip_example.py
-	OUTPUT ${PROJECT_BINARY_DIR}/html/examples/tag/html/index.html
+	OUTPUT ${PROJECT_BINARY_DIR}/html/examples/tag/html/index.html ${PROJECT_BINARY_DIR}/html/examples/tag/latex/refman_doc.tex
 )
 
 add_custom_command(
@@ -185,8 +184,9 @@ add_custom_command(
 
 add_custom_command(
 	COMMAND ${EXECUTABLE_OUTPUT_PATH}/doxygen templ.cfg
+        COMMAND ${PYTHON_EXECUTABLE}  ${TOP}/examples/strip_example.py  < ${PROJECT_BINARY_DIR}/html/examples/template/latex/refman.tex > ${PROJECT_BINARY_DIR}/html/examples/template/latex/refman_doc.tex
 	DEPENDS doxygen templ.cpp templ.cfg ${TOP}/examples/strip_example.py
-	OUTPUT ${PROJECT_BINARY_DIR}/html/examples/template/html/index.html
+	OUTPUT ${PROJECT_BINARY_DIR}/html/examples/template/html/index.html ${PROJECT_BINARY_DIR}/html/examples/template/latex/refman_doc.tex
 )
 
 add_custom_command(
@@ -246,5 +246,3 @@ if (DOT)
 	OUTPUT ${PROJECT_BINARY_DIR}/html/examples/diagrams/html/index.html ${PROJECT_BINARY_DIR}/html/examples/diagrams/latex/refman_doc.tex
   )
 endif(DOT)
-
-endif()

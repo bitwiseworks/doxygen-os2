@@ -698,7 +698,7 @@ class FilterTexLabel
     {
       if (v.isValid() && (v.type()==TemplateVariant::String))
       {
-        return TemplateVariant(latexEscapeLabelName(v.toString(),FALSE),TRUE);
+        return TemplateVariant(latexEscapeLabelName(v.toString()),TRUE);
       }
       else
       {
@@ -717,7 +717,7 @@ class FilterTexIndex
     {
       if (v.isValid() && (v.type()==TemplateVariant::String))
       {
-        return TemplateVariant(latexEscapeIndexChars(v.toString(),FALSE),TRUE);
+        return TemplateVariant(latexEscapeIndexChars(v.toString()),TRUE);
       }
       else
       {
@@ -5113,7 +5113,7 @@ class TemplateEngine::Private
         }
         else
         {
-          err("Cound not open template file %s\n",fileName.data());
+          err("Could not open template file %s\n",fileName.data());
         }
       }
       return templ;

@@ -1050,7 +1050,7 @@ static int getNextId(const QCString &expr,int p,int *l)
   return -1;
 }
 
-/*! preforms recursive macro expansion on the string \a expr
+/*! performs recursive macro expansion on the string \a expr
  *  starting at position \a pos.
  *  May read additional characters from the input while re-scanning!
  *  If \a expandAll is \c TRUE then all macros in the expression are
@@ -1405,7 +1405,7 @@ void addDefine()
   MemberDef *md=new MemberDef(
       g_yyFileName,g_yyLineNr-g_yyMLines,g_yyColNr,
       "#define",g_defName,g_defArgsStr,0,
-      Public,Normal,FALSE,Member,MemberType_Define,0,0);
+      Public,Normal,FALSE,Member,MemberType_Define,0,0,"");
   if (!g_defArgsStr.isEmpty())
   {
     ArgumentList *argList = new ArgumentList;
@@ -1739,7 +1739,9 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
 %x	SkipString
 %x	CopyLine
 %x	CopyString
+%x	CopyStringCs
 %x	CopyStringFtn
+%x	CopyStringFtnDouble
 %x      Include
 %x      IncludeID
 %x      EndImport
@@ -1849,9 +1851,21 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
 <CopyLine>"'"."'"			{ 
   					  outputArray(yytext,(int)yyleng);
 					}
+<CopyLine>@\"				{
+                                          if (getLanguageFromFileName(g_yyFileName)!=SrcLangExt_CSharp) REJECT;
+					  outputArray(yytext,(int)yyleng);
+					  BEGIN( CopyStringCs );
+					}
 <CopyLine>\"				{
 					  outputChar(*yytext);
-					  BEGIN( CopyString );
+                                          if (getLanguageFromFileName(g_yyFileName)!=SrcLangExt_Fortran)
+                                          {
+					    BEGIN( CopyString );
+                                          }
+                                          else
+                                          {
+					    BEGIN( CopyStringFtnDouble );
+                                          }
 					}
 <CopyLine>\'				{
                                           if (getLanguageFromFileName(g_yyFileName)!=SrcLangExt_Fortran) REJECT;
@@ -1859,17 +1873,30 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
 					  BEGIN( CopyStringFtn );
 					}
 <CopyString>[^\"\\\r\n]+		{
+					  outputArray(yytext,(int)yyleng);
+					}
+<CopyStringCs>[^\"\r\n]+		{
   					  outputArray(yytext,(int)yyleng);
 					}
 <CopyString>\\.				{
 					  outputArray(yytext,(int)yyleng);
 					}
-<CopyString>\"				{
+<CopyString,CopyStringCs>\"		{
+					  outputChar(*yytext);
+					  BEGIN( CopyLine );
+					}
+<CopyStringFtnDouble>[^\"\\\r\n]+	{
+					  outputArray(yytext,(int)yyleng);
+					}
+<CopyStringFtnDouble>\\.		{
+					  outputArray(yytext,(int)yyleng);
+					}
+<CopyStringFtnDouble>\"			{
 					  outputChar(*yytext);
 					  BEGIN( CopyLine );
 					}
 <CopyStringFtn>[^\'\\\r\n]+		{
-  					  outputArray(yytext,(int)yyleng);
+					  outputArray(yytext,(int)yyleng);
 					}
 <CopyStringFtn>\\.			{
 					  outputArray(yytext,(int)yyleng);
@@ -1934,6 +1961,7 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
 					  }
   					}
 <CopyLine>"\\"\r?/\n			{ // strip line continuation characters
+                                          if (getLanguageFromFileName(g_yyFileName)==SrcLangExt_Fortran) outputChar(*yytext);
   					}
 <CopyLine>.				{
   					  outputChar(*yytext);
@@ -1984,6 +2012,11 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
   					  g_defArgsStr+=*yytext;
   					  BEGIN(ReadString);
   					}
+<FindDefineArgs>'                       {
+                                          if (getLanguageFromFileName(g_yyFileName)!=SrcLangExt_Fortran) REJECT;
+                                          g_defArgsStr+=*yytext;
+                                          BEGIN(ReadString);
+                                        }
 <FindDefineArgs>\n			{
                                           g_defArgsStr+=' ';
   					  g_yyLineNr++;
@@ -2014,6 +2047,12 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
   					  g_defArgsStr+=*yytext;
 					  BEGIN(FindDefineArgs);
   					}
+<ReadString>"'"                         {
+                                          if (getLanguageFromFileName(g_yyFileName)!=SrcLangExt_Fortran) REJECT;
+                                          g_defArgsStr+=*yytext;
+                                          BEGIN(FindDefineArgs);
+                                        }
+
 <ReadString>"//"|"/*"			{
   					  g_defArgsStr+=yytext;
   					}
@@ -2658,10 +2697,17 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
 <SkipCComment,SkipVerbatim>.		{
   					  outputChar(*yytext);
   					}
-<CopyCComment>[^*a-z_A-Z\x80-\xFF\n]+		{
+<CopyCComment>[^*a-z_A-Z\x80-\xFF\n]*[^*a-z_A-Z\x80-\xFF\\\n] {
 					  g_defLitText+=yytext;
 					  g_defText+=escapeAt(yytext);
-  					}
+					}
+<CopyCComment>\\[\r]?\n                 {
+                                          g_defLitText+=yytext;
+                                          outputChar('\n');
+                                          g_defText+=" ";
+                                          g_yyLineNr++;
+                                          g_yyMLines++;
+                                        }
 <CopyCComment>"*/"			{
 					  g_defLitText+=yytext;
 					  g_defText+=yytext;
@@ -2753,7 +2799,7 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
 					  g_defLitText+=yytext;
 					  g_defText+=yytext;
   					}
-<DefineText>\\[\r]?\n			{ 
+<DefineText>\\[\r]?\n			{
 					  g_defLitText+=yytext;
 					  outputChar('\n');
 					  g_defText += ' ';
@@ -2895,7 +2941,7 @@ CHARLIT   (("'"\\[0-7]{1,3}"'")|("'"\\."'")|("'"[^'\\\n]{1,4}"'"))
                                           }
   					}
 <*>"//"[/]?				{
-                                          if (YY_START==SkipVerbatim || YY_START==SkipCond)
+                                          if (YY_START==SkipVerbatim || YY_START==SkipCond || getLanguageFromFileName(g_yyFileName)==SrcLangExt_Fortran)
                                           {
                                             REJECT;
                                           }
@@ -3177,7 +3223,7 @@ void preprocessFile(const char *fileName,BufStr &input,BufStr &output)
   {
     CondCtx *ctx = g_condStack.pop();
     QCString sectionInfo = " ";
-    if (ctx->sectionId!=" ") sectionInfo.sprintf(" with label %s ",ctx->sectionId.data()); 
+    if (ctx->sectionId!=" ") sectionInfo.sprintf(" with label '%s' ",ctx->sectionId.stripWhiteSpace().data());
     warn(fileName,ctx->lineNr,"Conditional section%sdoes not have "
 	"a corresponding \\endcond command within this file.",sectionInfo.data());
     delete ctx;
