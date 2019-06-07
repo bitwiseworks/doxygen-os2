@@ -22,7 +22,7 @@ static const int g_numberHtmlMappedCmds = 11;
 
 //! @brief Structure defining all HTML4 entities, doxygen extensions and doxygen commands representing special symbols.
 //! @details In case an entity does not exist a NULL is given for the entity. The first column contains the symbolic code
-//!          for the entity, see also doxparser.h The second column contains the name of the enitity (without the starting \& and
+//!          for the entity, see also doxparser.h The second column contains the name of the entity (without the starting \& and
 //!          ending ;)
 static struct htmlEntityInfo
 {
@@ -314,7 +314,9 @@ static struct htmlEntityInfo
   { SYM(Quot),     "\"",           "\"",         "\"",                   "&quot;",        "\"",                     "\"",     "\"",          { "\"",         DocSymbol::Perl_char    }},
   { SYM(Minus),    "-",            "-",          "-",                    "-",             "-\\/",                   "-",      "-",           { "-",          DocSymbol::Perl_char    }},
   { SYM(Plus),     "+",            "+",          "+",                    "+",             "+",                      "+",      "+",           { "+",          DocSymbol::Perl_char    }},
-  { SYM(Dot),      ".",            ".",          ".",                    ".",             ".",                      ".",      ".",           { ".",          DocSymbol::Perl_char    }}
+  { SYM(Dot),      ".",            ".",          ".",                    ".",             ".",                      ".",      ".",           { ".",          DocSymbol::Perl_char    }},
+  { SYM(Colon),    ":",            ":",          ":",                    ":",             ":",                      ":",      ":",           { ":",          DocSymbol::Perl_char    }},
+  { SYM(Equal),    "=",            "=",          "=",                    "=",             "=",                      "=",      "=",           { "=",          DocSymbol::Perl_char    }}
 };
 
 static const int g_numHtmlEntities = (int)(sizeof(g_htmlEntities)/ sizeof(*g_htmlEntities));

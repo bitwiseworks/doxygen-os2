@@ -55,14 +55,14 @@ both statements, i.e.:
 \endverbatim
 
 In case you want to expand the \c CONST_STRING macro, you should set the
-\ref cfg_macro_expansion "MACRO_EXPANSION" tag in the config file 
+\ref cfg_macro_expansion "MACRO_EXPANSION" tag in the configuration file 
 to \c YES. Then the result after preprocessing becomes:
 
 \verbatim
 #define VERSION
 #define CONST_STRING
 
-  static const char * version = "1.xx";
+  static const char * version = "2.xx";
 \endverbatim
 
 Note that doxygen will now expand \e all macro definitions 
@@ -130,7 +130,7 @@ without macro expansion doxygen will get confused, but we may not want to
 expand the \c REFIID macro, because it is documented and the user that reads 
 the documentation should use it when implementing the interface.
 
-By setting the following in the config file:
+By setting the following in the configuration file:
 
 \verbatim
 ENABLE_PREPROCESSING = YES

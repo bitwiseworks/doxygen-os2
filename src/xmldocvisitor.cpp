@@ -31,6 +31,7 @@
 #include "filename.h"
 #include "config.h"
 #include "htmlentity.h"
+#include "emoji.h"
 
 static void visitCaption(XmlDocVisitor *parent, QList<DocNode> children)
 {
@@ -39,10 +40,10 @@ static void visitCaption(XmlDocVisitor *parent, QList<DocNode> children)
   for (cli.toFirst();(n=cli.current());++cli) n->accept(parent);
 }
 
-static void visitPreStart(FTextStream &t, const char *cmd, const bool doCaption, 
+static void visitPreStart(FTextStream &t, const char *cmd, bool doCaption, 
                           XmlDocVisitor *parent, QList<DocNode> children, 
                           const QCString &name, bool writeType, DocImage::Type type, const QCString &width, 
-                          const QCString &height)
+                          const QCString &height, bool inlineImage = FALSE)
 {
   t << "<" << cmd;
   if (writeType)
@@ -65,10 +66,11 @@ static void visitPreStart(FTextStream &t, const char *cmd, const bool doCaption,
   {
     t << " width=\"" << convertToXML(width) << "\"";
   }
-  else if (!height.isEmpty())
+  if (!height.isEmpty())
   {
     t << " height=\"" << convertToXML(height) << "\"";
   }
+  if (inlineImage) t << " inline=\"yes\">";
   if (doCaption)
   {
     t << " caption=\"";
@@ -133,6 +135,24 @@ void XmlDocVisitor::visit(DocSymbol *s)
   }
 }
 
+void XmlDocVisitor::visit(DocEmoji *s)
+{
+  if (m_hide) return;
+  const char *res = EmojiEntityMapper::instance()->name(s->index());
+  if (res)
+  {
+    QCString name=res;
+    name = name.mid(1,name.length()-2);
+    m_t << "<emoji name=\"" << name << "\" unicode=\"";
+    filter(EmojiEntityMapper::instance()->unicode(s->index()));
+    m_t << "\"/>";
+  }
+  else
+  {
+    m_t << s->name();
+  }
+}
+
 void XmlDocVisitor::visit(DocURL *u)
 {
   if (m_hide) return;
@@ -163,6 +183,12 @@ void XmlDocVisitor::visit(DocStyleChange *s)
   {
     case DocStyleChange::Bold:
       if (s->enable()) m_t << "<bold>";      else m_t << "</bold>";
+      break;
+    case DocStyleChange::Strike:
+      if (s->enable()) m_t << "<strike>";      else m_t << "</strike>";
+      break;
+    case DocStyleChange::Underline:
+      if (s->enable()) m_t << "<underline>";      else m_t << "</underline>";
       break;
     case DocStyleChange::Italic:
       if (s->enable()) m_t << "<emphasis>";     else m_t << "</emphasis>";
@@ -211,7 +237,11 @@ void XmlDocVisitor::visit(DocVerbatim *s)
   switch(s->type())
   {
     case DocVerbatim::Code: // fall though
-      m_t << "<programlisting>"; 
+      m_t << "<programlisting";
+      if (!s->language().isEmpty())
+          m_t << " filename=\"" << lang << "\">";
+      else
+          m_t << ">";
       Doxygen::parserManager->getParser(lang)
                             ->parseCode(m_ci,s->context(),s->text(),langExt,
                                         s->isExample(),s->exampleFile());
@@ -264,7 +294,7 @@ void XmlDocVisitor::visit(DocInclude *inc)
   {
     case DocInclude::IncWithLines:
       { 
-         m_t << "<programlisting>";
+         m_t << "<programlisting filename=\"" << inc->file() << "\">";
          QFileInfo cfi( inc->file() );
          FileDef fd( cfi.dirPath().utf8(), cfi.fileName().utf8() );
          Doxygen::parserManager->getParser(inc->extension())
@@ -284,7 +314,7 @@ void XmlDocVisitor::visit(DocInclude *inc)
       }
       break;    
     case DocInclude::Include: 
-      m_t << "<programlisting>";
+      m_t << "<programlisting filename=\"" << inc->file() << "\">";
       Doxygen::parserManager->getParser(inc->extension())
                             ->parseCode(m_ci,inc->context(),
                                         inc->text(),
@@ -303,7 +333,14 @@ void XmlDocVisitor::visit(DocInclude *inc)
     case DocInclude::DontInclude: 
       break;
     case DocInclude::HtmlInclude: 
-      m_t << "<htmlonly>";
+      if (inc->isBlock())
+      {
+        m_t << "<htmlonly block=\"yes\">";
+      }
+      else
+      {
+        m_t << "<htmlonly>";
+      }
       filter(inc->text());
       m_t << "</htmlonly>";
       break;
@@ -318,7 +355,7 @@ void XmlDocVisitor::visit(DocInclude *inc)
       m_t << "</verbatim>"; 
       break;
     case DocInclude::Snippet:
-      m_t << "<programlisting>";
+      m_t << "<programlisting filename=\"" << inc->file() << "\">";
       Doxygen::parserManager->getParser(inc->extension())
                             ->parseCode(m_ci,
                                         inc->context(),
@@ -331,7 +368,7 @@ void XmlDocVisitor::visit(DocInclude *inc)
       break;
     case DocInclude::SnipWithLines:
       {
-         m_t << "<programlisting>";
+         m_t << "<programlisting filename=\"" << inc->file() << "\">";
          QFileInfo cfi( inc->file() );
          FileDef fd( cfi.dirPath().utf8(), cfi.fileName().utf8() );
          Doxygen::parserManager->getParser(inc->extension())
@@ -367,7 +404,7 @@ void XmlDocVisitor::visit(DocIncOperator *op)
   {
     if (!m_hide)
     {
-      m_t << "<programlisting>";
+      m_t << "<programlisting filename=\"" << op->includeFileName() << "\">";
     }
     pushEnabled();
     m_hide = TRUE;
@@ -484,7 +521,7 @@ void XmlDocVisitor::visitPre(DocPara *)
 void XmlDocVisitor::visitPost(DocPara *)
 {
   if (m_hide) return;
-  m_t << "</para>";
+  m_t << "</para>" << endl;
 }
 
 void XmlDocVisitor::visitPre(DocRoot *)
@@ -763,20 +800,25 @@ void XmlDocVisitor::visitPre(DocImage *img)
   {
     baseName=baseName.right(baseName.length()-i-1);
   }
-  visitPreStart(m_t, "image", FALSE, this, img->children(), baseName, TRUE, img->type(), img->width(), img->height());
+  visitPreStart(m_t, "image", FALSE, this, img->children(), baseName, TRUE, img->type(), img->width(), img->height(), img ->isInlineImage());
 
   // copy the image to the output dir
-  QFile inImage(img->name());
-  QFile outImage(Config_getString(XML_OUTPUT)+"/"+baseName.data());
-  if (inImage.open(IO_ReadOnly))
+  FileDef *fd;
+  bool ambig;
+  if ((fd=findFileDef(Doxygen::imageNameDict,img->name(),ambig)))
   {
-    if (outImage.open(IO_WriteOnly))
+    QFile inImage(fd->absFilePath());
+    QFile outImage(Config_getString(XML_OUTPUT)+"/"+baseName.data());
+    if (inImage.open(IO_ReadOnly))
     {
-      char *buffer = new char[inImage.size()];
-      inImage.readBlock(buffer,inImage.size());
-      outImage.writeBlock(buffer,inImage.size());
-      outImage.flush();
-      delete[] buffer;
+      if (outImage.open(IO_WriteOnly))
+      {
+        char *buffer = new char[inImage.size()];
+        inImage.readBlock(buffer,inImage.size());
+        outImage.writeBlock(buffer,inImage.size());
+        outImage.flush();
+        delete[] buffer;
+      }
     }
   }
 }

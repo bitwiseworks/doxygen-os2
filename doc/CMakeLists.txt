@@ -11,8 +11,6 @@
 # Documents produced by Doxygen are derivative works derived from the
 # input used in their production; they are not affected by this license.
 
-if (build_doc)
-
 include (${TOP}/cmake/version.cmake)
 string(TIMESTAMP DATE "%d-%m-%Y")
 
@@ -20,6 +18,7 @@ find_package(PythonInterp REQUIRED)
 find_program(EPSTOPDF NAMES epstopdf )
 find_program(PDFLATEX NAMES pdflatex )
 find_program(MAKEINDEX NAMES makeindex )
+include(GNUInstallDirs)
 
 if (doxygen_BINARY_DIR)
     set(DOXYGEN_EXECUTABLE ${doxygen_BINARY_DIR}/bin/doxygen)
@@ -28,6 +27,17 @@ else()
     # doxygen project variables are unknown so look for doxygen in PATH
     find_package(Doxygen)
 endif()
+#
+# set output directory for some extra HTML files
+#
+file(STRINGS Doxyfile DOXY_HTML_OUTPUT REGEX "HTML_OUTPUT.*")
+string(LENGTH "${DOXY_HTML_OUTPUT}" DOXY_HTML_OUTPUT_LEN)
+if (${DOXY_HTML_OUTPUT_LEN})
+  string(REGEX REPLACE ".*HTML_OUTPUT *= *\([^ ]*\)" "\\1" DOXY_HTML_OUTPUT ${DOXY_HTML_OUTPUT})
+else()
+  set(DOXY_HTML_OUTPUT "html")
+endif()
+set(PROJECT_BINARY_HTML_DIR ${PROJECT_BINARY_DIR}/${DOXY_HTML_OUTPUT}/)
 
 set(DOC_INSTALL_DIR "share/doc/packages/doxygen" CACHE STRING "Relative path where to install the documentation")
 set(DOC_FILES
@@ -81,15 +91,17 @@ set(DOC_FILES
         starting.doc
         trouble.doc
         xmlcmds.doc
+        emojisup.doc
         language.tpl
         maintainers.txt
         translator.py
+        smile.png
 )
 file(GLOB LANG_FILES "${TOP}/src/translator_??.h")
 
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/man)
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/src)
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/doc)
+file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/man
+                    ${PROJECT_BINARY_DIR}/src
+                    ${PROJECT_BINARY_DIR}/doc)
 
 file(COPY ${TOP}/VERSION                  DESTINATION ${PROJECT_BINARY_DIR}/)
 file(COPY ${TOP}/src/translator.h         DESTINATION ${PROJECT_BINARY_DIR}/src/)
@@ -114,7 +126,7 @@ configure_file(${CMAKE_SOURCE_DIR}/doc/doxyindexer.1      ${PROJECT_BINARY_DIR}/
 
 # doc/language.doc (see tag Doxyfile:INPUT)
 add_custom_command(
-        COMMAND ${PYTHON_EXECUTABLE} translator.py
+        COMMAND ${PYTHON_EXECUTABLE} translator.py ${CMAKE_SOURCE_DIR}
         DEPENDS ${PROJECT_BINARY_DIR}/doc/maintainers.txt ${PROJECT_BINARY_DIR}/doc/language.tpl ${PROJECT_BINARY_DIR}/doc/translator.py
         OUTPUT language.doc
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/doc
@@ -132,7 +144,7 @@ set_source_files_properties(config.doc PROPERTIES GENERATED 1)
 ################################################################################
 add_custom_target(run_doxygen
         COMMENT "Generating Latex and HTML documentation."
-        COMMAND ${DOXYGEN_EXECUTABLE}
+        COMMAND ${CMAKE_COMMAND} -E env VERSION=${VERSION} ${DOXYGEN_EXECUTABLE}
         DEPENDS ${PROJECT_BINARY_DIR}/doc/language.doc ${PROJECT_BINARY_DIR}/doc/config.doc
         DEPENDS ${OUT_DOC_FILES}
         DEPENDS examples
@@ -153,8 +165,8 @@ add_custom_target(doxygen_pdf
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/latex
 )
 add_custom_target(docs
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/doc/doxygen_logo.gif      ${PROJECT_BINARY_DIR}/html/
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/doc/doxygen_logo_low.gif  ${PROJECT_BINARY_DIR}/html/
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/doc/doxygen_logo.gif      ${PROJECT_BINARY_HTML_DIR}
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/doc/doxygen_logo_low.gif  ${PROJECT_BINARY_HTML_DIR}
         DEPENDS ${PROJECT_BINARY_DIR}/man/doxygen.1
                 ${PROJECT_BINARY_DIR}/man/doxywizard.1
                 ${PROJECT_BINARY_DIR}/man/doxysearch.1
@@ -169,7 +181,7 @@ install(FILES
         "${PROJECT_BINARY_DIR}/man/doxywizard.1"
         "${PROJECT_BINARY_DIR}/man/doxysearch.1"
         "${PROJECT_BINARY_DIR}/man/doxyindexer.1"
-        DESTINATION share/man/man1
+        DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 
 install(FILES
@@ -181,5 +193,3 @@ install(DIRECTORY
         "${PROJECT_BINARY_DIR}/html"
         DESTINATION "${CMAKE_INSTALL_PREFIX}/${DOC_INSTALL_DIR}"
 )
-
-endif(build_doc)

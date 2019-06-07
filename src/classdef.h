@@ -122,7 +122,7 @@ class ClassDef : public Definition
     bool isLocal() const;
 
     /** returns the classes nested into this class */
-    ClassSDict *getClassSDict();
+    ClassSDict *getClassSDict() const;
 
     /** returns TRUE if this class has documentation */
     bool hasDocumentation() const;
@@ -200,7 +200,7 @@ class ClassDef : public Definition
     MemberDef    *getMemberByName(const QCString &) const;
     
     /** Returns TRUE iff \a bcd is a direct or indirect base class of this
-     *  class. This function will recusively traverse all branches of the
+     *  class. This function will recursively traverse all branches of the
      *  inheritance tree.
      */
     bool isBaseClass(ClassDef *bcd,bool followInstances,int level=0);
@@ -244,7 +244,7 @@ class ClassDef : public Definition
      *  available, or 0 otherwise.
      *  @param name The name of the nested compound
      */
-    virtual Definition *findInnerCompound(const char *name);
+    virtual Definition *findInnerCompound(const char *name) const;
 
     /** Returns the template parameter lists that form the template
      *  declaration of this class.
@@ -265,6 +265,9 @@ class ClassDef : public Definition
 
     /** Returns TRUE if this class is implemented in Objective-C */
     bool isObjectiveC() const;
+
+    /** Returns TRUE if this class is implemented in Fortran */
+    bool isFortran() const;
 
     /** Returns TRUE if this class is implemented in C# */
     bool isCSharp() const;
@@ -333,6 +336,7 @@ class ClassDef : public Definition
     QCString getMemberListFileName() const;
     bool subGrouping() const;
 
+    bool isSliceLocal() const;
 
     //-----------------------------------------------------------------------------------
     // --- setters ----
@@ -372,6 +376,8 @@ class ClassDef : public Definition
     void addTaggedInnerClass(ClassDef *cd);
     void setTagLessReference(ClassDef *cd);
     void setName(const char *name);
+
+    void setMetaData(const char *md);
 
     //-----------------------------------------------------------------------------------
     // --- actions ----
@@ -426,6 +432,7 @@ class ClassDef : public Definition
     void writeDetailedDescription(OutputList &ol,const QCString &pageType,bool exampleFlag,
                                   const QCString &title,const QCString &anchor=QCString());
     void writeIncludeFiles(OutputList &ol);
+    void writeIncludeFilesForSlice(OutputList &ol);
     //void writeAllMembersLink(OutputList &ol);
     void writeInheritanceGraph(OutputList &ol);
     void writeCollaborationGraph(OutputList &ol);

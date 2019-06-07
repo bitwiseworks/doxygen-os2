@@ -76,14 +76,18 @@ QThreadPrivate::~QThreadPrivate()
 
 void *QThreadPrivate::start(void *arg)
 {
+#ifndef __ANDROID__
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+#endif
     pthread_cleanup_push(QThreadPrivate::finish, arg);
 
     QThread *thr = reinterpret_cast<QThread *>(arg);
 
     thr->started();
+#ifndef __ANDROID__
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_testcancel();
+#endif
     thr->run();
 
     pthread_cleanup_pop(1);
@@ -132,7 +136,7 @@ void QThread::start()
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_DETACHED);
-#ifndef _OS_OS2EMX_
+#if !defined(__ANDROID__) && !defined(_OS_OS2EMX_)
     pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
 #endif
     if (d->stackSize>0)
@@ -162,7 +166,7 @@ void QThread::start()
 void QThread::terminate()
 {
     QMutexLocker locker(&d->mutex);
-
+#ifndef __ANDROID__
     if (!d->thread_id) return;
 
     int code = pthread_cancel(d->thread_id);
@@ -174,6 +178,7 @@ void QThread::terminate()
     {
         d->terminated = TRUE;
     }
+#endif
 }
 
 void QThread::wait()
