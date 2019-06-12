@@ -20,11 +20,7 @@
 #include <math.h>
 #include <limits.h>
 
-#ifdef __OS2__
-#include "../libmd5/md5.h"
-#else
 #include "md5.h"
-#endif
 
 #include <qregexp.h>
 #include <qfileinfo.h>

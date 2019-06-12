@@ -1,8 +1,4 @@
-#ifdef __OS2__
-#include "../libmd5/md5.h"
-#else
 #include "md5.h"
-#endif
 
 #include "dirdef.h"
 #include "filename.h"

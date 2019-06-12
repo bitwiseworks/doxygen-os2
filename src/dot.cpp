@@ -40,11 +40,7 @@
 #include "dirdef.h"
 #include "vhdldocgen.h"
 #include "ftextstream.h"
-#ifdef __OS2__
-#include "../libmd5/md5.h"
-#else
 #include "md5.h"
-#endif
 #include "memberlist.h"
 #include "groupdef.h"
 #include "classlist.h"
