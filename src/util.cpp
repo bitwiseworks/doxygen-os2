@@ -1851,7 +1851,8 @@ QCString removeRedundantWhiteSpace(const QCString &s)
       case '*':
         if (i>0 && pc!=' ' && pc!='\t' && pc!=':' &&
                    pc!='*' && pc!='&'  && pc!='(' && pc!='/' &&
-                   pc!='.' && (osp<9 || !(pc=='>' && osp==11)))
+                   pc!='.' && osp<9
+           )
           // avoid splitting &&, **, .*, operator*, operator->*
         {
           *dst++=' ';
@@ -1859,7 +1860,7 @@ QCString removeRedundantWhiteSpace(const QCString &s)
         *dst++=c;
         break;
       case '&':
-        if (i>0 && isId(pc))
+        if (i>0 && isId(pc) && osp<9)
         {
           if (nc != '=')
           // avoid splitting operator&=
@@ -1899,8 +1900,7 @@ QCString removeRedundantWhiteSpace(const QCString &s)
           if (g_charAroundSpace.charMap[(uchar)pc].before &&
               g_charAroundSpace.charMap[(uchar)nc].after  &&
               !(pc==',' && nc=='.') &&
-              (osp<8 || (osp>=8 && pc!='"' && isId(nc)) || (osp>=8 && pc!='"' && nc!='"'))
-                  // e.g.    'operator >>' -> 'operator>>',
+              (osp<8 || (osp>=8 && isId(pc) && isId(nc)))                  // e.g.    'operator >>' -> 'operator>>',
                   //         'operator "" _x' -> 'operator""_x',
                   // but not 'operator int' -> 'operatorint'
              )
@@ -5448,6 +5448,7 @@ QCString escapeCharsInString(const char *name,bool allowDots,bool allowUnderscor
   static bool allowUnicodeNames = Config_getBool(ALLOW_UNICODE_NAMES);
   static GrowBuf growBuf;
   growBuf.clear();
+  if (name==0) return "";
   char c;
   const char *p=name;
   while ((c=*p++)!=0)
@@ -6943,6 +6944,7 @@ void filterLatexString(FTextStream &t,const char *str,
 
 QCString latexEscapeLabelName(const char *s)
 {
+  if (s==0) return "";
   QGString result;
   QCString tmp(qstrlen(s)+1);
   FTextStream t(&result);
@@ -6980,6 +6982,7 @@ QCString latexEscapeLabelName(const char *s)
 
 QCString latexEscapeIndexChars(const char *s)
 {
+  if (s==0) return "";
   QGString result;
   QCString tmp(qstrlen(s)+1);
   FTextStream t(&result);
@@ -7018,6 +7021,7 @@ QCString latexEscapeIndexChars(const char *s)
 
 QCString latexEscapePDFString(const char *s)
 {
+  if (s==0) return "";
   QGString result;
   FTextStream t(&result);
   const char *p=s;
@@ -7042,6 +7046,7 @@ QCString latexEscapePDFString(const char *s)
 
 QCString latexFilterURL(const char *s)
 {
+  if (s==0) return "";
   QGString result;
   FTextStream t(&result);
   const char *p=s;
