@@ -1277,6 +1277,10 @@ DotManager::DotManager() : m_dotMaps(1009)
   m_queue = new DotRunnerQueue;
   int i;
   int numThreads = QMIN(32,Config_getInt(DOT_NUM_THREADS));
+#ifdef __OS2__ // multiworker is somehow not working for us :(
+  if (numThreads == 0)
+    numThreads = 1;
+#endif
   if (numThreads!=1)
   {
     if (numThreads==0) numThreads = QMAX(2,QThread::idealThreadCount()+1);
