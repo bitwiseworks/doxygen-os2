@@ -93,7 +93,7 @@ HtmlHelpIndex::~HtmlHelpIndex()
 }
 
 /*! Stores an item in the index if it is not already present. 
- *  Items are stored in alphetical order, by sorting on the
+ *  Items are stored in alphabetical order, by sorting on the
  *  concatenation of \a level1 and \a level2 (if present).
  *
  *  \param level1 the string at level 1 in the index.
@@ -308,8 +308,7 @@ void HtmlHelp::initialize()
   m_fromUtf8 = portable_iconv_open(str,"UTF-8"); 
   if (m_fromUtf8==(void *)(-1))
   {
-    err("unsupported character conversion for CHM_INDEX_ENCODING: '%s'->'UTF-8'\n", str);
-    exit(1);
+    term("unsupported character conversion for CHM_INDEX_ENCODING: '%s'->'UTF-8'\n", str);
   }
 
   /* open the contents file */
@@ -317,8 +316,7 @@ void HtmlHelp::initialize()
   cf = new QFile(fName);
   if (!cf->open(IO_WriteOnly))
   {
-    err("Could not open file %s for writing\n",fName.data());
-    exit(1);
+    term("Could not open file %s for writing\n",fName.data());
   }
   /* Write the header of the contents file */
   cts.setDevice(cf);
@@ -334,8 +332,7 @@ void HtmlHelp::initialize()
   kf = new QFile(fName);
   if (!kf->open(IO_WriteOnly))
   {
-    err("Could not open file %s for writing\n",fName.data());
-    exit(1);
+    term("Could not open file %s for writing\n",fName.data());
   }
   /* Write the header of the contents file */
   kts.setDevice(kf);
@@ -632,7 +629,7 @@ void HtmlHelp::addContentsItem(bool isDir,
                                const char *anchor,
                                bool /* separateIndex */,
                                bool /* addToNavIndex */,
-                               Definition * /* def */)
+                               const Definition * /* def */)
 {
   // If we're using a binary toc then folders cannot have links. 
   // Tried this and I didn't see any problems, when not using
@@ -677,7 +674,7 @@ void HtmlHelp::addContentsItem(bool isDir,
 }
 
 
-void HtmlHelp::addIndexItem(Definition *context,MemberDef *md,
+void HtmlHelp::addIndexItem(const Definition *context,const MemberDef *md,
                             const char *sectionAnchor,const char *word)
 {
   if (md)

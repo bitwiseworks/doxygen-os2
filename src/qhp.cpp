@@ -168,8 +168,7 @@ void Qhp::finalize()
   QFile file(fileName);
   if (!file.open(IO_WriteOnly))
   {
-    err("Could not open file %s for writing\n", fileName.data());
-    exit(1);
+    term("Could not open file %s for writing\n", fileName.data());
   }
   m_doc.dumpTo(file);
 }
@@ -193,7 +192,7 @@ void Qhp::addContentsItem(bool /*isDir*/, const char * name,
                           const char * /*ref*/, const char * file, 
                           const char *anchor, bool /* separateIndex */,
                           bool /* addToNavIndex */,
-                          Definition * /*def*/)
+                          const Definition * /*def*/)
 {
   //printf("Qhp::addContentsItem(%s) %d\n",name,m_sectionLevel);
   // Backup difference before modification
@@ -214,7 +213,7 @@ void Qhp::addContentsItem(bool /*isDir*/, const char * name,
   }
 }
 
-void Qhp::addIndexItem(Definition *context,MemberDef *md,
+void Qhp::addIndexItem(const Definition *context,const MemberDef *md,
                        const char *sectionAnchor,const char *word)
 {
   (void)word;

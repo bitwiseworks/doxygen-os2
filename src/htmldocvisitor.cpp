@@ -65,7 +65,7 @@ static const char *contexts[10] =
   "intertd"    // 9
 };
 
-static QCString convertIndexWordToAnchor(const QString &word)
+static QCString convertIndexWordToAnchor(const QCString &word)
 {
   static char hex[] = "0123456789abcdef";
   static int cnt = 0;
@@ -126,7 +126,6 @@ static bool mustBeOutsideParagraph(DocNode *n)
         case DocNode::Kind_Internal:
           /* <div> */
         case DocNode::Kind_Include:
-        case DocNode::Kind_Image:
         case DocNode::Kind_SecRefList:
           /* <hr> */
         case DocNode::Kind_HorRuler:
@@ -152,6 +151,8 @@ static bool mustBeOutsideParagraph(DocNode *n)
                  ((DocStyleChange*)n)->style()==DocStyleChange::Center;
         case DocNode::Kind_Formula:
           return !((DocFormula*)n)->isInline();
+        case DocNode::Kind_Image:
+          return !((DocImage*)n)->isInlineImage();
         default:
           break;
   }
@@ -210,28 +211,64 @@ static bool isInvisibleNode(DocNode *node)
       ;
 }
 
-static QString htmlAttribsToString(const HtmlAttribList &attribs, bool img_tag = FALSE)
+static void mergeHtmlAttributes(const HtmlAttribList &attribs, HtmlAttribList *mergeInto)
 {
-  QString result;
   HtmlAttribListIterator li(attribs);
   HtmlAttrib *att;
-  bool alt_set = FALSE;
+  for (li.toFirst();(att=li.current());++li)
+  {
+    HtmlAttribListIterator ml(*mergeInto);
+    HtmlAttrib *opt;
+    bool found = false;
+    for (ml.toFirst();(opt=ml.current());++ml)
+    {
+      if (opt->name == att -> name)
+      {
+        found = true;
+        break;
+      }
+    }
+    if (found)
+    {
+       opt->value = opt->value + " " + att->value;
+    }
+    else
+    {
+      mergeInto->append(att);
+    }
+  }
+}
 
+static QCString htmlAttribsToString(const HtmlAttribList &attribs, QCString *pAltValue = 0)
+{
+  QCString result;
+  HtmlAttribListIterator li(attribs);
+  HtmlAttrib *att;
   for (li.toFirst();(att=li.current());++li)
   {
     if (!att->value.isEmpty())  // ignore attribute without values as they
                                 // are not XHTML compliant, with the exception
 				// of the alt attribute with the img tag
     {
-      result+=" ";
-      result+=att->name;
-      result+="=\""+convertToXML(att->value)+"\"";
-      if (att->name == "alt") alt_set = TRUE;
+      if (att->name=="alt" && pAltValue) // optionally return the value of alt separately
+                                         // need to convert <img> to <object> for SVG images,
+                                         // which do not support the alt attribute
+      {
+        *pAltValue = att->value;
+      }
+      else
+      {
+        result+=" ";
+        result+=att->name;
+        result+="=\""+convertToXML(att->value)+"\"";
+      }
     }
-  }
-  if (!alt_set && img_tag)
-  {
-      result+=" alt=\"\"";
+    else if (att->name=="nowrap") // In XHTML, attribute minimization is forbidden, and the nowrap attribute must be defined as <td nowrap="nowrap">.
+    {
+        result+=" ";
+        result+=att->name;
+        result+="=\"nowrap\"";
+    }
   }
   return result;
 }
@@ -239,7 +276,7 @@ static QString htmlAttribsToString(const HtmlAttribList &attribs, bool img_tag =
 //-------------------------------------------------------------------------
 
 HtmlDocVisitor::HtmlDocVisitor(FTextStream &t,CodeOutputInterface &ci,
-                               Definition *ctx) 
+                               const Definition *ctx) 
   : DocVisitor(DocVisitor_Html), m_t(t), m_ci(ci), m_insidePre(FALSE), 
                                  m_hide(FALSE), m_ctx(ctx)
 {
@@ -347,17 +384,17 @@ void HtmlDocVisitor::visit(DocURL *u)
   }
 }
 
-void HtmlDocVisitor::visit(DocLineBreak *)
+void HtmlDocVisitor::visit(DocLineBreak *br)
 {
   if (m_hide) return;
-  m_t << "<br />\n";
+  m_t << "<br "<< htmlAttribsToString(br->attribs()) << " />\n";
 }
 
 void HtmlDocVisitor::visit(DocHorRuler *hr)
 {
   if (m_hide) return;
   forceEndParagraph(hr);
-  m_t << "<hr/>\n";
+  m_t << "<hr "<< htmlAttribsToString(hr->attribs()) << " />\n";
   forceStartParagraph(hr);
 }
 
@@ -369,11 +406,20 @@ void HtmlDocVisitor::visit(DocStyleChange *s)
     case DocStyleChange::Bold:
       if (s->enable()) m_t << "<b" << htmlAttribsToString(s->attribs()) << ">";      else m_t << "</b>";
       break;
+    case DocStyleChange::S:
+      if (s->enable()) m_t << "<s" << htmlAttribsToString(s->attribs()) << ">";      else m_t << "</s>";
+      break;
     case DocStyleChange::Strike:
       if (s->enable()) m_t << "<strike" << htmlAttribsToString(s->attribs()) << ">";      else m_t << "</strike>";
       break;
+    case DocStyleChange::Del:
+      if (s->enable()) m_t << "<del" << htmlAttribsToString(s->attribs()) << ">";      else m_t << "</del>";
+      break;
     case DocStyleChange::Underline:
       if (s->enable()) m_t << "<u" << htmlAttribsToString(s->attribs()) << ">";      else m_t << "</u>";
+      break;
+    case DocStyleChange::Ins:
+      if (s->enable()) m_t << "<ins" << htmlAttribsToString(s->attribs()) << ">";      else m_t << "</ins>";
       break;
     case DocStyleChange::Italic:
       if (s->enable()) m_t << "<em" << htmlAttribsToString(s->attribs()) << ">";     else m_t << "</em>";
@@ -475,8 +521,8 @@ void HtmlDocVisitor::visit(DocVerbatim *s)
     case DocVerbatim::Code: 
       forceEndParagraph(s);
       m_t << PREFRAG_START;
-      Doxygen::parserManager->getParser(lang)
-                            ->parseCode(m_ci,
+      Doxygen::parserManager->getCodeParser(lang)
+                             .parseCode(m_ci,
                                         s->context(),
                                         s->text(),
                                         langExt,
@@ -588,9 +634,14 @@ void HtmlDocVisitor::visit(DocVerbatim *s)
     case DocVerbatim::PlantUML:
       {
         forceEndParagraph(s);
-
         static QCString htmlOutput = Config_getString(HTML_OUTPUT);
-        QCString baseName = writePlantUMLSource(htmlOutput,s->exampleFile(),s->text());
+        QCString imgExt = getDotImageExtension();
+        PlantumlManager::OutputFormat format = PlantumlManager::PUML_BITMAP;	// default : PUML_BITMAP
+        if (imgExt=="svg")
+        {
+          format = PlantumlManager::PUML_SVG;
+        }
+        QCString baseName = PlantumlManager::instance()->writePlantUMLSource(htmlOutput,s->exampleFile(),s->text(),format);
         m_t << "<div class=\"plantumlgraph\">" << endl;
         writePlantUMLFile(baseName,s->relPath(),s->context());
         visitPreCaption(m_t, s);
@@ -606,7 +657,7 @@ void HtmlDocVisitor::visit(DocVerbatim *s)
 void HtmlDocVisitor::visit(DocAnchor *anc)
 {
   if (m_hide) return;
-  m_t << "<a class=\"anchor\" id=\"" << anc->anchor() << "\"></a>";
+  m_t << "<a class=\"anchor\" id=\"" << anc->anchor() << "\"" << htmlAttribsToString(anc->attribs()) << "></a>";
 }
 
 void HtmlDocVisitor::visit(DocInclude *inc)
@@ -618,8 +669,8 @@ void HtmlDocVisitor::visit(DocInclude *inc)
     case DocInclude::Include: 
       forceEndParagraph(inc);
       m_t << PREFRAG_START;
-      Doxygen::parserManager->getParser(inc->extension())
-                            ->parseCode(m_ci,                 
+      Doxygen::parserManager->getCodeParser(inc->extension())
+                             .parseCode(m_ci,                 
                                         inc->context(),
                                         inc->text(),
                                         langExt,
@@ -641,15 +692,15 @@ void HtmlDocVisitor::visit(DocInclude *inc)
          forceEndParagraph(inc);
          m_t << PREFRAG_START;
          QFileInfo cfi( inc->file() );
-         FileDef fd( cfi.dirPath().utf8(), cfi.fileName().utf8() );
-         Doxygen::parserManager->getParser(inc->extension())
-                               ->parseCode(m_ci,
+         FileDef *fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
+         Doxygen::parserManager->getCodeParser(inc->extension())
+                                .parseCode(m_ci,
                                            inc->context(),
                                            inc->text(),
                                            langExt,
                                            inc->isExample(),
                                            inc->exampleFile(), 
-                                           &fd,   // fileDef,
+                                           fd,   // fileDef,
                                            -1,    // start line
                                            -1,    // end line
                                            FALSE, // inline fragment
@@ -657,11 +708,14 @@ void HtmlDocVisitor::visit(DocInclude *inc)
                                            TRUE,  // show line numbers
                                            m_ctx  // search context
                                            );
+         delete fd;
          m_t << PREFRAG_END;
          forceStartParagraph(inc);
       }
       break;
-    case DocInclude::DontInclude: 
+    case DocInclude::DontInclude:
+    case DocInclude::LatexInclude:
+    case DocInclude::DontIncWithLines:
       break;
     case DocInclude::HtmlInclude:
       {
@@ -669,8 +723,6 @@ void HtmlDocVisitor::visit(DocInclude *inc)
         m_t << inc->text();
         if (inc->isBlock()) forceStartParagraph(inc);
       }
-      break;
-    case DocInclude::LatexInclude:
       break;
     case DocInclude::VerbInclude: 
       forceEndParagraph(inc);
@@ -683,8 +735,8 @@ void HtmlDocVisitor::visit(DocInclude *inc)
       {
          forceEndParagraph(inc);
          m_t << PREFRAG_START;
-         Doxygen::parserManager->getParser(inc->extension())
-                               ->parseCode(m_ci,
+         Doxygen::parserManager->getCodeParser(inc->extension())
+                                .parseCode(m_ci,
                                            inc->context(),
                                            extractBlock(inc->text(),inc->blockId()),
                                            langExt,
@@ -707,15 +759,15 @@ void HtmlDocVisitor::visit(DocInclude *inc)
          forceEndParagraph(inc);
          m_t << PREFRAG_START;
          QFileInfo cfi( inc->file() );
-         FileDef fd( cfi.dirPath().utf8(), cfi.fileName().utf8() );
-         Doxygen::parserManager->getParser(inc->extension())
-                               ->parseCode(m_ci,
+         FileDef *fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
+         Doxygen::parserManager->getCodeParser(inc->extension())
+                                .parseCode(m_ci,
                                            inc->context(),
                                            extractBlock(inc->text(),inc->blockId()),
                                            langExt,
                                            inc->isExample(),
                                            inc->exampleFile(), 
-                                           &fd,
+                                           fd,
                                            lineBlock(inc->text(),inc->blockId()),
                                            -1,    // endLine
                                            FALSE, // inlineFragment
@@ -723,6 +775,7 @@ void HtmlDocVisitor::visit(DocInclude *inc)
                                            TRUE,  // show line number
                                            m_ctx  // search context
                                           );
+         delete fd;
          m_t << PREFRAG_END;
          forceStartParagraph(inc);
       }
@@ -737,7 +790,7 @@ void HtmlDocVisitor::visit(DocInclude *inc)
 
 void HtmlDocVisitor::visit(DocIncOperator *op)
 {
-  //printf("DocIncOperator: type=%d first=%d, last=%d text=`%s'\n",
+  //printf("DocIncOperator: type=%d first=%d, last=%d text='%s'\n",
   //    op->type(),op->isFirst(),op->isLast(),op->text().data());
   if (op->isFirst()) 
   {
@@ -746,28 +799,37 @@ void HtmlDocVisitor::visit(DocIncOperator *op)
     pushEnabled();
     m_hide=TRUE;
   }
-  SrcLangExt langExt = getLanguageFromFileName(m_langExt);
+  QCString locLangExt = getFileNameExtension(op->includeFileName());
+  if (locLangExt.isEmpty()) locLangExt = m_langExt;
+  SrcLangExt langExt = getLanguageFromFileName(locLangExt);
   if (op->type()!=DocIncOperator::Skip) 
   {
     popEnabled();
     if (!m_hide) 
     {
-      Doxygen::parserManager->getParser(m_langExt)
-                            ->parseCode(
+      FileDef *fd = 0;
+      if (!op->includeFileName().isEmpty())
+      {
+        QFileInfo cfi( op->includeFileName() );
+        fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
+      }
+      Doxygen::parserManager->getCodeParser(locLangExt)
+                             .parseCode(
                                 m_ci,
                                 op->context(),
                                 op->text(),
                                 langExt,
                                 op->isExample(),
                                 op->exampleFile(),
-                                0,     // fileDef
-                                -1,    // startLine
+                                fd,     // fileDef
+                                op->line(),    // startLine
                                 -1,    // endLine
                                 FALSE, // inline fragment
                                 0,     // memberDef
-                                TRUE,  // show line numbers
+                                op->showLineNo(),  // show line numbers
                                 m_ctx  // search context
                                );
+      if (fd) delete fd;
     }
     pushEnabled();
     m_hide=TRUE;
@@ -1198,13 +1260,17 @@ void HtmlDocVisitor::visitPre(DocPara *p)
   //printf("  needsTag=%d\n",needsTag);
   // write the paragraph tag (if needed)
   if (needsTag)
-    m_t << "<p" << getDirHtmlClassOfNode(getTextDirByConfig(p), contexts[t]) << ">";
+    m_t << "<p" << getDirHtmlClassOfNode(getTextDirByConfig(p), contexts[t]) << htmlAttribsToString(p->attribs()) << ">";
   else if(!paragraphAlreadyStarted)
-    m_t << getHtmlDirEmbedingChar(getTextDirByConfig(p));
+    m_t << getHtmlDirEmbeddingChar(getTextDirByConfig(p)) << htmlAttribsToString(p->attribs());
 }
 
 void HtmlDocVisitor::visitPost(DocPara *p)
 {
+
+  //printf("DocPara::visitPost: parent of kind %d ",
+  //       p->parent() ? p->parent()->kind() : -1);
+
   bool needsTag = FALSE;
   if (p->parent()) 
   {
@@ -1480,10 +1546,14 @@ void HtmlDocVisitor::visitPre(DocHtmlTable *t)
 
   if (t->hasCaption())
   {
-    m_t << "<a class=\"anchor\" id=\"" << t->caption()->anchor() << "\"></a>\n";
+    QCString anc =  t->caption()->anchor();
+    if (!anc.isEmpty())
+    {
+      m_t << "<a class=\"anchor\" id=\"" << anc << "\"></a>\n";
+    }
   }
 
-  QString attrs = htmlAttribsToString(t->attribs());
+  QCString attrs = htmlAttribsToString(t->attribs());
   if (attrs.isEmpty())
   {
     m_t << "<table";
@@ -1577,7 +1647,7 @@ void HtmlDocVisitor::visitPre(DocHRef *href)
   else
   {
     QCString url = correctURL(href->url(),href->relPath());
-    m_t << "<a href=\"" << convertToXML(url)  << "\""
+    m_t << "<a href=\"" << convertToHtml(url)  << "\""
         << htmlAttribsToString(href->attribs()) << ">";
   }
 }
@@ -1610,23 +1680,15 @@ void HtmlDocVisitor::visitPre(DocImage *img)
   if (img->type()==DocImage::Html)
   {
     bool inlineImage = img->isInlineImage();
-    bool typeSVG = FALSE;
-
+    bool typeSVG = img->isSVG();
     QCString url = img->url();
-    if (url.isEmpty())
-    {
-      typeSVG = (img->name().right(4)==".svg");
-    }
-    else
-    {
-      typeSVG = (url.right(4)==".svg");
-    }
+
     if (!inlineImage)
     {
       forceEndParagraph(img);
     }
     if (m_hide) return;
-    QString baseName=img->name();
+    QCString baseName=img->name();
     int i;
     if ((i=baseName.findRev('/'))!=-1 || (i=baseName.findRev('\\'))!=-1)
     {
@@ -1642,51 +1704,75 @@ void HtmlDocVisitor::visitPre(DocImage *img)
     {
       sizeAttribs+=" height=\""+img->height()+"\"";
     }
+    // 16 cases: url.isEmpty() | typeSVG | inlineImage | img->hasCaption()
+
+    HtmlAttribList extraAttribs;
+    if (typeSVG)
+    {
+      HtmlAttrib opt;
+      opt.name  = "style";
+      opt.value = "pointer-events: none;";
+      extraAttribs.append(&opt);
+    }
+    QCString alt;
+    mergeHtmlAttributes(img->attribs(),&extraAttribs);
+    QCString attrs = htmlAttribsToString(extraAttribs,&alt);
+    QCString src;
     if (url.isEmpty())
     {
-      if (typeSVG)
+      src = img->relPath()+img->name();
+    }
+    else
+    {
+      src = correctURL(url,img->relPath());
+    }
+    if (typeSVG)
+    {
+      m_t << "<object type=\"image/svg+xml\" data=\"" << convertToHtml(src)
+        << "\"" << sizeAttribs << attrs;
+      if (inlineImage)
       {
-        m_t << "<object type=\"image/svg+xml\" data=\"" << img->relPath() << img->name()
-            << "\"" << sizeAttribs << htmlAttribsToString(img->attribs()) << ">" << baseName
-            << "</object>" << endl;
+        // skip closing tag
       }
       else
       {
-        m_t << "<img src=\"" << img->relPath() << img->name() << "\" alt=\""
-            << baseName << "\"" << sizeAttribs << htmlAttribsToString(img->attribs())
-	    << (inlineImage ? " class=\"inline\"" : "/>\n");
+        m_t << ">" << alt << "</object>" << endl;
       }
     }
-    else // link to URL
+    else
     {
-      if (typeSVG)
+      m_t << "<img src=\"" << convertToHtml(src) << "\" alt=\"" << alt << "\"" << sizeAttribs << attrs;
+      if (inlineImage)
       {
-        m_t << "<object type=\"image/svg+xml\" data=\"" << correctURL(url,img->relPath())
-            << "\"" << sizeAttribs << htmlAttribsToString(img->attribs())
-            << "></object>" << endl;
+        m_t << " class=\"inline\"";
       }
       else
       {
-        m_t << "<img src=\"" << correctURL(url,img->relPath()) << "\""
-            << sizeAttribs << htmlAttribsToString(img->attribs(), TRUE)
-	    << (inlineImage ? " class=\"inline\"" : "/>\n");
+        m_t << "/>\n";
       }
     }
     if (img->hasCaption())
     {
       if (inlineImage)
       {
-       m_t << " title=\"";
+        m_t << " title=\"";
       }
       else
       {
         m_t << "<div class=\"caption\">" << endl;
-        m_t << getHtmlDirEmbedingChar(getTextDirByConfig(img));
+        m_t << getHtmlDirEmbeddingChar(getTextDirByConfig(img));
       }
     }
     else if (inlineImage)
     {
-      m_t << "/>" << endl;
+      if (typeSVG)
+      {
+        m_t << ">" << alt << "</object>";
+      }
+      else
+      {
+        m_t << "/>";
+      }
     }
   }
   else // other format -> skip
@@ -1705,11 +1791,24 @@ void HtmlDocVisitor::visitPost(DocImage *img)
     if (img->hasCaption())
     {
       if (inlineImage)
-        m_t << "\"/>\n ";
-      else
+      {
+        if (img->isSVG())
+        {
+          QCString alt;
+          QCString attrs = htmlAttribsToString(img->attribs(),&alt);
+          m_t << "\">" << alt << "</object>";
+        }
+        else
+        {
+          m_t << "\"/>";
+        }
+      }
+      else // end <div class="caption">
+      {
         m_t << "</div>";
+      }
     }
-    if (!inlineImage)
+    if (!inlineImage) // end <div class="image">
     {
       m_t << "</div>" << endl;
       forceStartParagraph(img);
@@ -1816,12 +1915,7 @@ void HtmlDocVisitor::visitPost(DocRef *ref)
 void HtmlDocVisitor::visitPre(DocSecRefItem *ref)
 {
   if (m_hide) return;
-  QString refName=ref->file();
-  if (refName.right(Doxygen::htmlFileExtension.length())!=
-      QString(Doxygen::htmlFileExtension))
-  {
-    refName+=Doxygen::htmlFileExtension;
-  }
+  QCString refName=addHtmlExtensionIfMissing(ref->file());
   m_t << "<li><a href=\"" << refName << "#" << ref->anchor() << "\">";
 
 }
@@ -1836,8 +1930,8 @@ void HtmlDocVisitor::visitPre(DocSecRefList *s)
 {
   if (m_hide) return;
   forceEndParagraph(s);
-  m_t << "<div class=\"multicol\">" << endl;
-  m_t << "<ul>" << endl;
+  m_t << "<div>" << endl;
+  m_t << "<ul class=\"multicol\">" << endl;
 }
 
 void HtmlDocVisitor::visitPost(DocSecRefList *s) 
@@ -1850,7 +1944,7 @@ void HtmlDocVisitor::visitPost(DocSecRefList *s)
 
 //void HtmlDocVisitor::visitPre(DocLanguage *l)
 //{
-//  QString langId = Config_getEnum(OUTPUT_LANGUAGE);
+//  QCString langId = Config_getEnum(OUTPUT_LANGUAGE);
 //  if (l->id().lower()!=langId.lower())
 //  {
 //    pushEnabled();
@@ -1860,7 +1954,7 @@ void HtmlDocVisitor::visitPost(DocSecRefList *s)
 //
 //void HtmlDocVisitor::visitPost(DocLanguage *l) 
 //{
-//  QString langId = Config_getEnum(OUTPUT_LANGUAGE);
+//  QCString langId = Config_getEnum(OUTPUT_LANGUAGE);
 //  if (l->id().lower()!=langId.lower())
 //  {
 //    popEnabled();
@@ -1946,10 +2040,8 @@ void HtmlDocVisitor::visitPre(DocParamList *pl)
     m_t << "<td class=\"paramtype\">";
     QListIterator<DocNode> li(pl->paramTypes());
     DocNode *type;
-    bool first=TRUE;
     for (li.toFirst();(type=li.current());++li)
     {
-      if (!first) m_t << "&#160;|&#160;"; else first=FALSE;
       if (type->kind()==DocNode::Kind_Word)
       {
         visit((DocWord*)type); 
@@ -1957,6 +2049,10 @@ void HtmlDocVisitor::visitPre(DocParamList *pl)
       else if (type->kind()==DocNode::Kind_LinkedWord)
       {
         visit((DocLinkedWord*)type); 
+      }
+      else if (type->kind()==DocNode::Kind_Sep)
+      {
+        m_t << "&#160;" << ((DocSeparator *)type)->chars() << "&#160;";
       }
     }
     m_t << "</td>";
@@ -2000,7 +2096,7 @@ void HtmlDocVisitor::visitPre(DocXRefItem *x)
   {
     m_t << "<dl" << getDirHtmlClassOfNode(getTextDirByConfig(x), x->key())  
         << "><dt><b><a class=\"el\" href=\""
-        << x->relPath() << x->file() << Doxygen::htmlFileExtension 
+        << x->relPath() << addHtmlExtensionIfMissing(x->file())
         << "#" << x->anchor() << "\">";
   }
   else 
@@ -2034,14 +2130,6 @@ void HtmlDocVisitor::visitPost(DocInternalRef *)
   m_t << " ";
 }
 
-void HtmlDocVisitor::visitPre(DocCopy *)
-{
-}
-
-void HtmlDocVisitor::visitPost(DocCopy *)
-{
-}
-
 void HtmlDocVisitor::visitPre(DocText *)
 {
 }
@@ -2054,7 +2142,7 @@ void HtmlDocVisitor::visitPre(DocHtmlBlockQuote *b)
 {
   if (m_hide) return;
   forceEndParagraph(b);
-  QString attrs = htmlAttribsToString(b->attribs());
+  QCString attrs = htmlAttribsToString(b->attribs());
   if (attrs.isEmpty())
   {
     m_t << "<blockquote" << getDirHtmlClassOfNode(getTextDirByConfig(b), "doxtable")
@@ -2164,7 +2252,7 @@ void HtmlDocVisitor::startLink(const QCString &ref,const QCString &file,
   if (!ref.isEmpty()) // link to entity imported via tag file
   {
     m_t << "<a class=\"elRef\" ";
-    m_t << externalLinkTarget() << externalRef(relPath,ref,FALSE);
+    m_t << externalLinkTarget();
   }
   else // local link
   {
@@ -2172,7 +2260,10 @@ void HtmlDocVisitor::startLink(const QCString &ref,const QCString &file,
   }
   m_t << "href=\"";
   m_t << externalRef(relPath,ref,TRUE);
-  if (!file.isEmpty()) m_t << file << Doxygen::htmlFileExtension;
+  if (!file.isEmpty())
+  {
+    m_t << addHtmlExtensionIfMissing(file);
+  }
   if (!anchor.isEmpty()) m_t << "#" << anchor;
   m_t << "\"";
   if (!tooltip.isEmpty()) m_t << " title=\"" << convertToHtml(tooltip) << "\"";
@@ -2279,7 +2370,7 @@ void HtmlDocVisitor::writePlantUMLFile(const QCString &fileName,
   QCString imgExt = getDotImageExtension();
   if (imgExt=="svg")
   {
-    generatePlantUMLOutput(fileName,outDir,PUML_SVG);
+    PlantumlManager::instance()->generatePlantUMLOutput(fileName,outDir,PlantumlManager::PUML_SVG);
     //m_t << "<iframe scrolling=\"no\" frameborder=\"0\" src=\"" << relPath << baseName << ".svg" << "\" />" << endl;
     //m_t << "<p><b>This browser is not able to show SVG: try Firefox, Chrome, Safari, or Opera instead.</b></p>";
     //m_t << "</iframe>" << endl;
@@ -2287,7 +2378,7 @@ void HtmlDocVisitor::writePlantUMLFile(const QCString &fileName,
   }
   else
   {
-    generatePlantUMLOutput(fileName,outDir,PUML_BITMAP);
+    PlantumlManager::instance()->generatePlantUMLOutput(fileName,outDir,PlantumlManager::PUML_BITMAP);
     m_t << "<img src=\"" << relPath << baseName << ".png" << "\" />" << endl;
   }
 }
@@ -2340,16 +2431,14 @@ void HtmlDocVisitor::forceEndParagraph(DocNode *n)
     DocPara *para = (DocPara*)n->parent();
     int nodeIndex = para->children().findRef(n);
     nodeIndex--;
-    if (nodeIndex<0) return; // first node
+    if (nodeIndex<0) return; // first node in paragraph
     while (nodeIndex>=0 && isInvisibleNode(para->children().at(nodeIndex)))
     {
         nodeIndex--;
     }
-    if (nodeIndex>=0)
-    {
-      DocNode *n = para->children().at(nodeIndex);
-      if (mustBeOutsideParagraph(n)) return;
-    }
+    if (nodeIndex<0) return; // first visible node in paragraph
+    DocNode *n = para->children().at(nodeIndex);
+    if (mustBeOutsideParagraph(n)) return; // previous node already outside paragraph context
     nodeIndex--;
     bool styleOutsideParagraph=insideStyleChangeThatIsOutsideParagraph(para,nodeIndex);
     bool isFirst;
@@ -2403,7 +2492,7 @@ void HtmlDocVisitor::forceStartParagraph(DocNode *n)
     if (needsTag)
       m_t << "<p" << getDirHtmlClassOfNode(getTextDirByConfig(para, nodeIndex)) << ">";
     else
-      m_t << getHtmlDirEmbedingChar(getTextDirByConfig(para, nodeIndex));
+      m_t << getHtmlDirEmbeddingChar(getTextDirByConfig(para, nodeIndex));
   }
 }
 

@@ -105,11 +105,20 @@ class PrintDocVisitor : public DocVisitor
         case DocStyleChange::Bold:
           if (s->enable()) printf("<bold>"); else printf("</bold>");
           break;
+        case DocStyleChange::S:
+          if (s->enable()) printf("<s>"); else printf("</s>");
+          break;
         case DocStyleChange::Strike:
           if (s->enable()) printf("<strike>"); else printf("</strike>");
           break;
+        case DocStyleChange::Del:
+          if (s->enable()) printf("<del>"); else printf("</del>");
+          break;
         case DocStyleChange::Underline:
           if (s->enable()) printf("<underline>"); else printf("</underline>");
+          break;
+        case DocStyleChange::Ins:
+          if (s->enable()) printf("<ins>"); else printf("</ins>");
           break;
         case DocStyleChange::Italic:
           if (s->enable()) printf("<italic>"); else printf("</italic>");
@@ -187,6 +196,7 @@ class PrintDocVisitor : public DocVisitor
         case DocInclude::Include: printf("include"); break;
         case DocInclude::IncWithLines: printf("incwithlines"); break;
         case DocInclude::DontInclude: printf("dontinclude"); break;
+        case DocInclude::DontIncWithLines: printf("dontinwithlines"); break;
         case DocInclude::HtmlInclude:
                printf("htmlinclude");
                if (inc->isBlock()) printf(" block=\"yes\"");
@@ -615,16 +625,24 @@ class PrintDocVisitor : public DocVisitor
       //const char *s;
       DocNode *param;
       printf("<parameters>");
-      for (sli.toFirst();(param=sli.current());++sli)
+      if (sli.count() > 0)
       {
         printf("<param>");
-        if (param->kind()==DocNode::Kind_Word)
+        for (sli.toFirst();(param=sli.current());++sli)
         {
-          visit((DocWord*)param); 
-        }
-        else if (param->kind()==DocNode::Kind_LinkedWord)
-        {
-          visit((DocLinkedWord*)param); 
+          if (param->kind()==DocNode::Kind_Word)
+          {
+            visit((DocWord*)param);
+          }
+          else if (param->kind()==DocNode::Kind_LinkedWord)
+          {
+            visit((DocLinkedWord*)param);
+          }
+          else if (param->kind()==DocNode::Kind_Sep)
+          {
+            printf("</param>");
+            printf("<param>");
+          }
         }
         printf("</param>");
       }
@@ -674,16 +692,6 @@ class PrintDocVisitor : public DocVisitor
     {
       indent_post();
       printf("</internalref>\n");
-    }
-    void visitPre(DocCopy *c)
-    {
-      indent_pre();
-      printf("<copy link=\"%s\">\n",c->link().data());
-    }
-    void visitPost(DocCopy *)
-    {
-      indent_post();
-      printf("</copy>\n");
     }
     void visitPre(DocText *)
     {

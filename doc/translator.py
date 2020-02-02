@@ -141,8 +141,8 @@ class Transl:
         self.baseClassId = None
         self.readableStatus = None   # 'up-to-date', '1.2.3', '1.3', etc.
         self.status = None           # '', '1.2.03', '1.3.00', etc.
-        self.lang = None             # like 'Brasilian'
-        self.langReadable = None     # like 'Brasilian Portuguese'
+        self.lang = None             # like 'Brazilian'
+        self.langReadable = None     # like 'Brazilian Portuguese'
         self.note = None             # like 'should be cleaned up'
         self.prototypeDic = {}       # uniPrototype -> prototype
         self.translateMeText = 'translate me!'
@@ -1821,9 +1821,9 @@ class TrManager:
         tplDic['numLangStr'] = str(self.numLang)
 
         # Define templates for HTML table parts of the documentation.
-        htmlTableTpl = '''\
+        htmlTableTpl = '''
             \\htmlonly
-			</p>
+            </p>
             <table align="center" cellspacing="0" cellpadding="0" border="0">
             <tr bgcolor="#000000">
             <td>
@@ -1842,7 +1842,7 @@ class TrManager:
             </td>
             </tr>
             </table>
-			<p>
+            <p>
             \\endhtmlonly
             '''
         htmlTableTpl = textwrap.dedent(htmlTableTpl)

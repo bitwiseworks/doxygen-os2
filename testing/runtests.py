@@ -2,8 +2,37 @@
 
 from __future__ import print_function
 import argparse, glob, itertools, re, shutil, os, sys
+import subprocess
 
 config_reg = re.compile('.*\/\/\s*(?P<name>\S+):\s*(?P<value>.*)$')
+
+
+def xopen(fname, mode='r', encoding='utf-8'):
+	'''Unified file opening for Python 2 an Python 3.
+
+	Python 2 does not have the encoding argument. Python 3 has one.
+	'''
+
+	if sys.version_info[0] == 2:
+		return open(fname, mode=mode) # Python 2 without encoding
+	else:
+		return open(fname, mode=mode, encoding=encoding) # Python 3 with encoding
+
+def xpopen(cmd, cmd1="",encoding='utf-8-sig', getStderr=False):
+	'''Unified file pipe opening for Python 2 an Python 3.
+
+	Python 2 does not have the encoding argument. Python 3 has one. and
+	'''
+
+	if sys.version_info[0] == 2:
+		return os.popen(cmd).read() # Python 2 without encoding
+	else:
+		if (getStderr):
+			proc = subprocess.run(cmd1,encoding=encoding,capture_output=True) # Python 3 with encoding
+			return proc.stderr
+		else:
+			proc = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,encoding=encoding) # Python 3 with encoding
+			return proc.stdout.read()
 
 class Tester:
 	def __init__(self,args,test):
@@ -25,7 +54,7 @@ class Tester:
 		elif not os.path.isfile(expected_file):
 			return (True,'%s absent' % expected_file)
 		else:
-			diff = os.popen('diff -b -w -u %s %s' % (got_file,expected_file)).read()
+			diff = xpopen('diff -b -w -u %s %s' % (got_file,expected_file))
 			if diff and not diff.startswith("No differences"):
 				return (True,'Difference between generated output and reference:\n%s' % diff)
 		return (False,'')
@@ -67,7 +96,7 @@ class Tester:
 
 	def get_config(self):
 		config = {}
-		with open(self.args.inputdir+'/'+self.test,'r') as f:
+		with xopen(self.args.inputdir+'/'+self.test,'r') as f:
 			for line in f.readlines():
 				m = config_reg.match(line)
 				if m:
@@ -84,14 +113,14 @@ class Tester:
 		shutil.rmtree(self.test_out,ignore_errors=True)
 		os.mkdir(self.test_out)
 		shutil.copy(self.args.inputdir+'/Doxyfile',self.test_out)
-		with open(self.test_out+'/Doxyfile','a') as f:
+		with xopen(self.test_out+'/Doxyfile','a') as f:
 			print('INPUT=%s/%s' % (self.args.inputdir,self.test), file=f)
 			print('STRIP_FROM_PATH=%s' % self.args.inputdir, file=f)
 			print('EXAMPLE_PATH=%s' % self.args.inputdir, file=f)
 			if 'config' in self.config:
 				for option in self.config['config']:
 					print(option, file=f)
-			if (self.args.xml):
+			if (self.args.xml or self.args.xmlxsd):
 				print('GENERATE_XML=YES', file=f)
 				print('XML_OUTPUT=%s/out' % self.test_out, file=f)
 			else:
@@ -113,9 +142,12 @@ class Tester:
 			print('HTML_FILE_EXTENSION=.xhtml', file=f)
 			if (self.args.pdf):
 				print('GENERATE_LATEX=YES', file=f)
+				print('LATEX_BATCHMODE=YES', file=f)
 				print('LATEX_OUTPUT=%s/latex' % self.test_out, file=f)
 			if self.args.subdirs:
 				print('CREATE_SUBDIRS=YES', file=f)
+			if (self.args.clang):
+				print('CLANG_ASSISTED_PARSING=YES', file=f)
 			if (self.args.cfgs):
 				for cfg in list(itertools.chain.from_iterable(self.args.cfgs)):
 					if cfg.find('=') == -1:
@@ -152,7 +184,7 @@ class Tester:
 					print('Non-existing file %s after \'check:\' statement' % check_file)
 					return
 				# convert output to canonical form
-				data = os.popen('%s --format --noblanks --nowarning %s' % (self.args.xmllint,check_file)).read()
+				data = xpopen('%s --format --noblanks --nowarning %s' % (self.args.xmllint,check_file)).read()
 				if data:
 					# strip version
 					data = re.sub(r'xsd" version="[0-9.-]+"','xsd" version=""',data).rstrip('\n')
@@ -160,7 +192,7 @@ class Tester:
 					print('Failed to run %s on the doxygen output file %s' % (self.args.xmllint,self.test_out))
 					return
 				out_file='%s/%s' % (self.test_out,check)
-				with open(out_file,'w') as f:
+				with xopen(out_file,'w') as f:
 					print(data,file=f)
 		shutil.rmtree(self.test_out+'/out',ignore_errors=True)
 		os.remove(self.test_out+'/Doxyfile')
@@ -182,11 +214,13 @@ class Tester:
 		failed_latex=False
 		failed_docbook=False
 		failed_rtf=False
+		failed_xmlxsd=False
 		msg = ()
 		# look for files to check against the reference
-		if self.args.xml:
-			failed_xml=True
-			if 'check' in self.config:
+		if self.args.xml or self.args.xmlxsd:
+			failed_xml=False
+			if 'check' in self.config and self.args.xml:
+				failed_xml=True
 				for check in self.config['check']:
 					check_file='%s/out/%s' % (self.test_out,check)
 					# check if the file we need to check is actually generated
@@ -200,7 +234,7 @@ class Tester:
 						else:
 							check_file = check_file[0]
 					# convert output to canonical form
-					data = os.popen('%s --format --noblanks --nowarning %s' % (self.args.xmllint,check_file)).read()
+					data = xpopen('%s --format --noblanks --nowarning %s' % (self.args.xmllint,check_file))
 					if data:
 						# strip version
 						data = re.sub(r'xsd" version="[0-9.-]+"','xsd" version=""',data).rstrip('\n')
@@ -208,16 +242,73 @@ class Tester:
 						msg += ('Failed to run %s on the doxygen output file %s' % (self.args.xmllint,self.test_out),)
 						break
 					out_file='%s/%s' % (self.test_out,check)
-					with open(out_file,'w') as f:
+					with xopen(out_file,'w') as f:
 						print(data,file=f)
 					ref_file='%s/%s/%s' % (self.args.inputdir,self.test_id,check)
 					(failed_xml,xml_msg) = self.compare_ok(out_file,ref_file,self.test_name)
 					if failed_xml:
 						msg+= (xml_msg,)
 						break
-				if not failed_xml and not self.args.keep:
-					xml_output='%s/out' % self.test_out
-					shutil.rmtree(xml_output,ignore_errors=True)
+			failed_xmlxsd=False
+			if self.args.xmlxsd:
+				xmlxsd_output='%s/out' % self.test_out
+				if (sys.platform == 'win32'):
+					redirx=' 2> %s/temp >nul:'%xmlxsd_output
+				else:
+					redirx='2>%s/temp >/dev/null'%xmlxsd_output
+				#
+				index_xml = []
+				index_xml.append(glob.glob('%s/index.xml' % (xmlxsd_output)))
+				index_xml.append(glob.glob('%s/*/*/index.xml' % (xmlxsd_output)))
+				index_xml = ' '.join(list(itertools.chain.from_iterable(index_xml))).replace(self.args.outputdir +'/','').replace('\\','/')
+				index_xsd = []
+				index_xsd.append(glob.glob('%s/index.xsd' % (xmlxsd_output)))
+				index_xsd.append(glob.glob('%s/*/*/index.xsd' % (xmlxsd_output)))
+				index_xsd = ' '.join(list(itertools.chain.from_iterable(index_xsd))).replace(self.args.outputdir +'/','').replace('\\','/')
+				exe_string = '%s --noout --schema %s %s' % (self.args.xmllint,index_xsd,index_xml)
+				exe_string1 = exe_string
+				exe_string += ' %s' % (redirx)
+				exe_string += ' %s more "%s/temp"' % (separ,xmlxsd_output)
+
+				xmllint_out = xpopen(exe_string,exe_string1,getStderr=True)
+				if xmllint_out:
+					xmllint_out = re.sub(r'.*validates','',xmllint_out).rstrip('\n')
+				else:
+					msg += ('Failed to run %s with schema %s for files: %s' % (self.args.xmllint,index_xsd,index_xml),)
+					failed_xmlxsd=True
+				if xmllint_out:
+					msg += (xmllint_out,)
+					failed_xmlxsd=True
+				#
+				compound_xml = []
+				compound_xml.append(glob.glob('%s/*.xml' % (xmlxsd_output)))
+				compound_xml.append(glob.glob('%s/*/*/*.xml' % (xmlxsd_output)))
+				compound_xml = ' '.join(list(itertools.chain.from_iterable(compound_xml))).replace(self.args.outputdir +'/','').replace('\\','/')
+				compound_xml = re.sub(r' [^ ]*/index.xml','',compound_xml)
+				compound_xml = re.sub(r'[^ ]*/index.xml ','',compound_xml)
+
+				compound_xsd = []
+				compound_xsd.append(glob.glob('%s/compound.xsd' % (xmlxsd_output)))
+				compound_xsd.append(glob.glob('%s/*/*/compound.xsd' % (xmlxsd_output)))
+				compound_xsd = ' '.join(list(itertools.chain.from_iterable(compound_xsd))).replace(self.args.outputdir +'/','').replace('\\','/')
+				exe_string = '%s --noout --schema %s %s' % (self.args.xmllint,compound_xsd,compound_xml)
+				exe_string1 = exe_string
+				exe_string += ' %s' % (redirx)
+				exe_string += ' %s more "%s/temp"' % (separ,xmlxsd_output)
+
+				xmllint_out = xpopen(exe_string,exe_string1,getStderr=True)
+				if xmllint_out:
+					xmllint_out = re.sub(r'.*validates','',xmllint_out).rstrip('\n')
+				else:
+					msg += ('Failed to run %s with schema %s for files: %s' % (self.args.xmllint,compound_xsd,compound_xml),)
+					failed_xmlxsd=True
+				if xmllint_out:
+					msg += (xmllint_out,)
+					failed_xmlxsd=True
+
+			if not failed_xml and not failed_xmlxsd and not self.args.keep:
+				xml_output='%s/out' % self.test_out
+				shutil.rmtree(xml_output,ignore_errors=True)
 
 		if (self.args.rtf):
 			# no tests defined yet
@@ -235,11 +326,13 @@ class Tester:
 			tests.append(glob.glob('%s/*.xml' % (docbook_output)))
 			tests.append(glob.glob('%s/*/*/*.xml' % (docbook_output)))
 			tests = ' '.join(list(itertools.chain.from_iterable(tests))).replace(self.args.outputdir +'/','').replace('\\','/')
-			exe_string = '%s --nonet --postvalid %s %s' % (self.args.xmllint,tests,redirx)
+			exe_string = '%s --nonet --postvalid %s' % (self.args.xmllint,tests)
+			exe_string1 = exe_string
+			exe_string += ' %s' % (redirx)
 			exe_string += ' %s more "%s/temp"' % (separ,docbook_output)
 
 			failed_docbook=False
-			xmllint_out = os.popen(exe_string).read()
+			xmllint_out = xpopen(exe_string,exe_string1,getStderr=True)
 			xmllint_out = self.cleanup_xmllint_docbook(xmllint_out)
 			if xmllint_out:
 				msg += (xmllint_out,)
@@ -253,10 +346,12 @@ class Tester:
 				redirx=' 2> %s/temp >nul:'%html_output
 			else:
 				redirx='2>%s/temp >/dev/null'%html_output
-			exe_string = '%s --path dtd --nonet --postvalid %s/*xhtml %s %s ' % (self.args.xmllint,html_output,redirx,separ)
-			exe_string += 'more "%s/temp"' % (html_output)
+			exe_string = '%s --path dtd --nonet --postvalid %s/*xhtml' % (self.args.xmllint,html_output)
+			exe_string1 = exe_string
+			exe_string += ' %s' % (redirx)
+			exe_string += ' %s more "%s/temp"' % (separ,html_output)
 			failed_html=False
-			xmllint_out = os.popen(exe_string).read()
+			xmllint_out = xpopen(exe_string,exe_string1,getStderr=True)
 			xmllint_out = self.cleanup_xmllint(xmllint_out)
 			if xmllint_out:
 				msg += (xmllint_out,)
@@ -268,21 +363,31 @@ class Tester:
 			latex_output='%s/latex' % self.test_out
 			if (sys.platform == 'win32'):
 				redirl='>nul: 2>temp'
+				mk='make.bat'
 			else:
 				redirl='>/dev/null 2>temp'
-			exe_string = 'cd %s %s echo "q" | make %s %s' % (latex_output,separ,redirl,separ)
-			exe_string += 'more temp'
-			latex_out = os.popen(exe_string).read()
+				mk='make'
+			cur_directory = os.getcwd()
+			os.chdir(latex_output)
+			exe_string = mk
+			exe_string1 = exe_string
+			exe_string += ' %s' % (redirl)
+			exe_string += ' %s more temp' % (separ)
+			latex_out = xpopen(exe_string,exe_string1,getStderr=True)
+			os.chdir(cur_directory);
 			if latex_out.find("Error")!=-1:
 				msg += ("PDF generation failed\n  For a description of the problem see 'refman.log' in the latex directory of this test",)
 				failed_html=True
-			elif open(latex_output + "/refman.log",'r').read().find("Emergency stop")!= -1:
+			elif xopen(latex_output + "/refman.log",'r').read().find("Error")!= -1:
+				msg += ("PDF generation failed\n  For a description of the problem see 'refman.log' in the latex directory of this test",)
+				failed_html=True
+			elif xopen(latex_output + "/refman.log",'r').read().find("Emergency stop")!= -1:
 				msg += ("PDF generation failed\n  For a description of the problem see 'refman.log' in the latex directory of this test",)
 				failed_html=True
 			elif not self.args.keep:
 				shutil.rmtree(latex_output,ignore_errors=True)
 
-		if failed_xml or failed_html or failed_latex or failed_docbook or failed_rtf:
+		if failed_xml or failed_html or failed_latex or failed_docbook or failed_rtf or failed_xmlxsd:
 			testmgr.ok(False,self.test_name,msg)
 			return
 
@@ -331,13 +436,14 @@ class TestManager:
 			tester = Tester(self.args,test)
 			tester.run(self)
 		res=self.result()
-		if self.args.xhtml and not res and not self.args.keep:
+		if self.args.xhtml and self.args.inputdir!='.' and not res and not self.args.keep:
 			shutil.rmtree("dtd",ignore_errors=True)
 		return 0 if self.args.updateref else res
 
 	def prepare_dtd(self):
-		shutil.rmtree("dtd",ignore_errors=True)
-		shutil.copytree(self.args.inputdir+"/dtd", "dtd")
+		if self.args.inputdir!='.':
+			shutil.rmtree("dtd",ignore_errors=True)
+			shutil.copytree(self.args.inputdir+"/dtd", "dtd")
 
 def main():
 	# argument handling
@@ -373,9 +479,14 @@ def main():
 		'create docbook output and check with xmllint',action="store_true")
 	parser.add_argument('--xhtml',help=
 		'create xhtml output and check with xmllint',action="store_true")
+	parser.add_argument('--xmlxsd',help=
+		'create xml output and check with xmllint against xsd',action="store_true")
 	parser.add_argument('--pdf',help='create LaTeX output and create pdf from it',
 		action="store_true")
 	parser.add_argument('--subdirs',help='use the configuration parameter CREATE_SUBDIRS=YES',
+		action="store_true")
+	parser.add_argument('--clang',help='use CLANG_ASSISTED_PARSING, works only when '
+                'doxygen has been compiled with "use_libclang"',
 		action="store_true")
 	parser.add_argument('--keep',help='keep result directories',
 		action="store_true")
@@ -386,7 +497,7 @@ def main():
 	args = parser.parse_args(test_flags + sys.argv[1:])
 
 	# sanity check
-	if (not args.xml) and (not args.pdf) and (not args.xhtml) and (not args.docbook and (not args.rtf)):
+	if (not args.xml) and (not args.pdf) and (not args.xhtml) and (not args.docbook and (not args.rtf) and (not args.xmlxsd)):
 		args.xml=True
 	if (not args.updateref is None) and (args.ids is None) and (args.all is None):
 		parser.error('--updateref requires either --id or --all')
@@ -411,7 +522,7 @@ def main():
 			tests.append(glob.glob('0%s_*'%id))
 			tests.append(glob.glob('00%s_*'%id))
 	if (not args.ids and not args.start_id):  # find all tests
-		tests = glob.glob('[0-9][0-9][0-9]_*')
+		tests = sorted(glob.glob('[0-9][0-9][0-9]_*'))
 	else:
 		tests = list(itertools.chain.from_iterable(tests))
 	os.chdir(starting_directory)

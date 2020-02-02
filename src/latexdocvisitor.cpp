@@ -38,7 +38,7 @@
 
 const int maxLevels=5;
 static const char *secLabels[maxLevels] = 
-   { "section","subsection","subsubsection","paragraph","subparagraph" };
+   { "doxysection","doxysubsection","doxysubsubsection","doxyparagraph","doxysubparagraph" };
 
 static const char *getSectionName(int level)
 {
@@ -280,7 +280,10 @@ void LatexDocVisitor::visit(DocLineBreak *)
 void LatexDocVisitor::visit(DocHorRuler *)
 {
   if (m_hide) return;
-  m_t << "\n\n";
+  if (insideTable())
+    m_t << "\\DoxyHorRuler{1}\n";
+  else
+    m_t << "\\DoxyHorRuler{0}\n";
 }
 
 void LatexDocVisitor::visit(DocStyleChange *s)
@@ -291,10 +294,13 @@ void LatexDocVisitor::visit(DocStyleChange *s)
     case DocStyleChange::Bold:
       if (s->enable()) m_t << "{\\bfseries{";      else m_t << "}}";
       break;
+    case DocStyleChange::S:
     case DocStyleChange::Strike:
+    case DocStyleChange::Del:
       if (s->enable()) m_t << "\\sout{";     else m_t << "}";
       break;
     case DocStyleChange::Underline:
+    case DocStyleChange::Ins:
       if (s->enable()) m_t << "\\uline{";     else m_t << "}";
       break;
     case DocStyleChange::Italic:
@@ -347,8 +353,8 @@ void LatexDocVisitor::visit(DocVerbatim *s)
       {
         m_t << "\n\\begin{DoxyCode}{" << usedTableLevels() << "}\n";
 	LatexCodeGenerator::setDoxyCodeOpen(TRUE);
-        Doxygen::parserManager->getParser(lang)
-                              ->parseCode(m_ci,s->context(),s->text(),langExt,
+        Doxygen::parserManager->getCodeParser(lang)
+                               .parseCode(m_ci,s->context(),s->text(),langExt,
                                           s->isExample(),s->exampleFile());
 	LatexCodeGenerator::setDoxyCodeOpen(FALSE);
         m_t << "\\end{DoxyCode}\n";
@@ -428,7 +434,7 @@ void LatexDocVisitor::visit(DocVerbatim *s)
     case DocVerbatim::PlantUML: 
       {
         QCString latexOutput = Config_getString(LATEX_OUTPUT);
-        QCString baseName = writePlantUMLSource(latexOutput,s->exampleFile(),s->text());
+        QCString baseName = PlantumlManager::instance()->writePlantUMLSource(latexOutput,s->exampleFile(),s->text(),PlantumlManager::PUML_EPS);
 
         writePlantUMLFile(baseName, s);
       }
@@ -458,20 +464,21 @@ void LatexDocVisitor::visit(DocInclude *inc)
          m_t << "\n\\begin{DoxyCodeInclude}{" << usedTableLevels() << "}\n";
 	 LatexCodeGenerator::setDoxyCodeOpen(TRUE);
          QFileInfo cfi( inc->file() );
-         FileDef fd( cfi.dirPath().utf8(), cfi.fileName().utf8() );
-         Doxygen::parserManager->getParser(inc->extension())
-                               ->parseCode(m_ci,inc->context(),
+         FileDef *fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
+         Doxygen::parserManager->getCodeParser(inc->extension())
+                                .parseCode(m_ci,inc->context(),
                                            inc->text(),
                                            langExt,
                                            inc->isExample(),
                                            inc->exampleFile(),
-                                           &fd,   // fileDef,
+                                           fd,   // fileDef,
                                            -1,    // start line
                                            -1,    // end line
                                            FALSE, // inline fragment
                                            0,     // memberDef
                                            TRUE   // show line numbers
 					  );
+         delete fd;
 	 LatexCodeGenerator::setDoxyCodeOpen(FALSE);
          m_t << "\\end{DoxyCodeInclude}" << endl;
       }
@@ -479,8 +486,8 @@ void LatexDocVisitor::visit(DocInclude *inc)
     case DocInclude::Include: 
       m_t << "\n\\begin{DoxyCodeInclude}{" << usedTableLevels() << "}\n";
       LatexCodeGenerator::setDoxyCodeOpen(TRUE);
-      Doxygen::parserManager->getParser(inc->extension())
-                            ->parseCode(m_ci,inc->context(),
+      Doxygen::parserManager->getCodeParser(inc->extension())
+                             .parseCode(m_ci,inc->context(),
                                         inc->text(),langExt,inc->isExample(),
                                         inc->exampleFile(),
                                         0,     // fileDef
@@ -493,9 +500,9 @@ void LatexDocVisitor::visit(DocInclude *inc)
       LatexCodeGenerator::setDoxyCodeOpen(FALSE);
       m_t << "\\end{DoxyCodeInclude}\n";
       break;
-    case DocInclude::DontInclude: 
-      break;
-    case DocInclude::HtmlInclude: 
+    case DocInclude::DontInclude:
+    case DocInclude::DontIncWithLines:
+    case DocInclude::HtmlInclude:
       break;
     case DocInclude::LatexInclude:
       m_t << inc->text();
@@ -509,8 +516,8 @@ void LatexDocVisitor::visit(DocInclude *inc)
       {
          m_t << "\n\\begin{DoxyCodeInclude}{" << usedTableLevels() << "}\n";
          LatexCodeGenerator::setDoxyCodeOpen(TRUE);
-         Doxygen::parserManager->getParser(inc->extension())
-                               ->parseCode(m_ci,
+         Doxygen::parserManager->getCodeParser(inc->extension())
+                                .parseCode(m_ci,
                                            inc->context(),
                                            extractBlock(inc->text(),inc->blockId()),
                                            langExt,
@@ -524,23 +531,24 @@ void LatexDocVisitor::visit(DocInclude *inc)
     case DocInclude::SnipWithLines:
       {
          QFileInfo cfi( inc->file() );
-         FileDef fd( cfi.dirPath().utf8(), cfi.fileName().utf8() );
+         FileDef *fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
          m_t << "\n\\begin{DoxyCodeInclude}{" << usedTableLevels() << "}\n";
          LatexCodeGenerator::setDoxyCodeOpen(TRUE);
-         Doxygen::parserManager->getParser(inc->extension())
-                               ->parseCode(m_ci,
+         Doxygen::parserManager->getCodeParser(inc->extension())
+                                .parseCode(m_ci,
                                            inc->context(),
                                            extractBlock(inc->text(),inc->blockId()),
                                            langExt,
                                            inc->isExample(),
                                            inc->exampleFile(), 
-                                           &fd,
+                                           fd,
                                            lineBlock(inc->text(),inc->blockId()),
                                            -1,    // endLine
                                            FALSE, // inlineFragment
                                            0,     // memberDef
                                            TRUE   // show line number
                                           );
+         delete fd;
          LatexCodeGenerator::setDoxyCodeOpen(FALSE);
          m_t << "\\end{DoxyCodeInclude}" << endl;
       }
@@ -555,7 +563,7 @@ void LatexDocVisitor::visit(DocInclude *inc)
 
 void LatexDocVisitor::visit(DocIncOperator *op)
 {
-  //printf("DocIncOperator: type=%d first=%d, last=%d text=`%s'\n",
+  //printf("DocIncOperator: type=%d first=%d, last=%d text='%s'\n",
   //    op->type(),op->isFirst(),op->isLast(),op->text().data());
   if (op->isFirst()) 
   {
@@ -564,15 +572,32 @@ void LatexDocVisitor::visit(DocIncOperator *op)
     pushEnabled();
     m_hide = TRUE;
   }
-  SrcLangExt langExt = getLanguageFromFileName(m_langExt);
+  QCString locLangExt = getFileNameExtension(op->includeFileName());
+  if (locLangExt.isEmpty()) locLangExt = m_langExt;
+  SrcLangExt langExt = getLanguageFromFileName(locLangExt);
   if (op->type()!=DocIncOperator::Skip) 
   {
     popEnabled();
     if (!m_hide) 
     {
-      Doxygen::parserManager->getParser(m_langExt)
-                            ->parseCode(m_ci,op->context(),op->text(),langExt,
-                                        op->isExample(),op->exampleFile());
+      FileDef *fd = 0;
+      if (!op->includeFileName().isEmpty())
+      {
+        QFileInfo cfi( op->includeFileName() );
+        fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
+      }
+
+      Doxygen::parserManager->getCodeParser(locLangExt)
+                             .parseCode(m_ci,op->context(),op->text(),langExt,
+                                        op->isExample(),op->exampleFile(),
+                                        fd,     // fileDef
+                                        op->line(),    // startLine
+                                        -1,    // endLine
+                                        FALSE, // inline fragment
+                                        0,     // memberDef
+                                        op->showLineNo()  // show line numbers
+                                       );
+      if (fd) delete fd;
     }
     pushEnabled();
     m_hide=TRUE;
@@ -600,7 +625,7 @@ void LatexDocVisitor::visit(DocFormula *f)
     {
       switch (c)
       {
-        case '\'': m_t << "\\text{'}"; break;
+        case '\'': m_t << "\\textnormal{\\textquotesingle}"; break;
         default:  m_t << c; break;
       }
     }
@@ -1567,10 +1592,8 @@ void LatexDocVisitor::visitPre(DocParamList *pl)
   {
     QListIterator<DocNode> li(pl->paramTypes());
     DocNode *type;
-    bool first=TRUE;
     for (li.toFirst();(type=li.current());++li)
     {
-      if (!first) m_t << " | "; else first=FALSE;
       if (type->kind()==DocNode::Kind_Word)
       {
         visit((DocWord*)type); 
@@ -1578,6 +1601,10 @@ void LatexDocVisitor::visitPre(DocParamList *pl)
       else if (type->kind()==DocNode::Kind_LinkedWord)
       {
         visit((DocLinkedWord*)type); 
+      }
+      else if (type->kind()==DocNode::Kind_Sep)
+      {
+        m_t << " " << ((DocSeparator *)type)->chars() << " ";
       }
     }
     if (useTable) m_t << " & ";
@@ -1677,14 +1704,6 @@ void LatexDocVisitor::visitPost(DocInternalRef *ref)
 {
   if (m_hide) return;
   endLink(0,ref->file(),ref->anchor());
-}
-
-void LatexDocVisitor::visitPre(DocCopy *)
-{
-}
-
-void LatexDocVisitor::visitPost(DocCopy *)
-{
 }
 
 void LatexDocVisitor::visitPre(DocText *)
@@ -1927,7 +1946,7 @@ void LatexDocVisitor::writePlantUMLFile(const QCString &baseName, DocVerbatim *s
     shortName=shortName.right(shortName.length()-i-1);
   }
   QCString outDir = Config_getString(LATEX_OUTPUT);
-  generatePlantUMLOutput(baseName,outDir,PUML_EPS);
+  PlantumlManager::instance()->generatePlantUMLOutput(baseName,outDir,PlantumlManager::PUML_EPS);
   visitPreStart(m_t, s->hasCaption(), shortName, s->width(), s->height());
   visitCaption(this, s->children());
   visitPostEnd(m_t, s->hasCaption());

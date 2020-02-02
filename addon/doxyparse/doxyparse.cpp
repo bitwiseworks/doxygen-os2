@@ -19,7 +19,12 @@
  */
 
 #include <stdlib.h>
-#include <unistd.h>
+#if !defined(_WIN32) || defined(__CYGWIN__)
+  #include <unistd.h>
+#else
+  #include <windows.h>
+#endif
+#include "version.h"
 #include "doxygen.h"
 #include "outputgen.h"
 #include "parserintf.h"
@@ -35,6 +40,10 @@
 #include <cstdlib>
 #include <sstream>
 #include <map>
+#include <qdir.h>
+#include <qcstring.h>
+#include <qregexp.h>
+#include "namespacedef.h"
 
 class Doxyparse : public CodeOutputInterface
 {
@@ -58,7 +67,7 @@ class Doxyparse : public CodeOutputInterface
                               const char *,const char *,const SourceLinkInfo &,
                               const SourceLinkInfo &) {}
     void startCodeLine(bool) {}
-    void setCurrentDoc(Definition *,const char *,bool) {}
+    void setCurrentDoc(const Definition *,const char *,bool) {}
     void addWord(const char *,bool) {}
 
     void linkableSymbol(int l, const char *sym, Definition *symDef, Definition *context)
@@ -76,25 +85,23 @@ class Doxyparse : public CodeOutputInterface
 };
 
 static bool is_c_code = true;
-static std::map<std::string, bool> modules;
-static std::string current_module;
 
 static void findXRefSymbols(FileDef *fd)
 {
   // get the interface to a parser that matches the file extension
-  ParserInterface *pIntf=Doxygen::parserManager->getParser(fd->getDefFileExtension());
+  CodeParserInterface &intf=Doxygen::parserManager->getCodeParser(fd->getDefFileExtension());
 
   // get the programming language from the file name
   SrcLangExt lang = getLanguageFromFileName(fd->name());
 
   // reset the parsers state
-  pIntf->resetCodeParserState();
+  intf.resetCodeParserState();
 
   // create a new backend object
   Doxyparse *parse = new Doxyparse(fd);
 
   // parse the source code
-  pIntf->parseCode(*parse, 0, fileToString(fd->absFilePath()), lang, FALSE, 0, fd);
+  intf.parseCode(*parse, 0, fileToString(fd->absFilePath()), lang, FALSE, 0, fd);
 
   // dismiss the object.
   delete parse;
@@ -102,7 +109,7 @@ static void findXRefSymbols(FileDef *fd)
 
 static bool ignoreStaticExternalCall(MemberDef *context, MemberDef *md) {
   if (md->isStatic()) {
-    if(md->getFileDef()) {
+    if(md->getFileDef() && context->getFileDef()) {
       if(md->getFileDef()->getOutputFileBase() == context->getFileDef()->getOutputFileBase())
         // TODO ignore prefix of file
         return false;
@@ -118,27 +125,29 @@ static bool ignoreStaticExternalCall(MemberDef *context, MemberDef *md) {
   }
 }
 
+static void startYamlDocument() {
+  printf("---\n");
+}
 static void printFile(std::string file) {
   printf("%s:\n", file.c_str());
 }
 static void printModule(std::string module) {
-  current_module = module;
-  printf("  %s:\n", module.c_str());
+  printf("  \"%s\":\n", unescapeCharsInString(module.c_str()).data());
 }
 static void printClassInformation(std::string information) {
   printf("    information: %s\n", information.c_str());
 }
+static void printInherits() {
+  printf("    inherits:\n");
+}
 static void printInheritance(std::string base_class) {
-  printf("    inherits: %s\n", base_class.c_str());
+  printf("      - %s\n", base_class.c_str());
 }
 static void printDefines() {
-  if (! modules[current_module]) {
-    printf("    defines:\n");
-  }
-  modules[current_module] = true;
+  printf("    defines:\n");
 }
 static void printDefinition(std::string type, std::string signature, int line) {
-  printf("      - \"%s\":\n", signature.c_str());
+  printf("      - \"%s\":\n", signature.substr(0, 1022).c_str());
   printf("          type: %s\n", type.c_str());
   printf("          line: %d\n", line);
 }
@@ -155,9 +164,9 @@ static void printUses() {
   printf("          uses:\n");
 }
 static void printReferenceTo(std::string type, std::string signature, std::string defined_in) {
-  printf("            - \"%s\":\n", signature.c_str());
+  printf("            - \"%s\":\n", signature.substr(0, 1022).c_str());
   printf("                type: %s\n", type.c_str());
-  printf("                defined_in: %s\n", defined_in.c_str());
+  printf("                defined_in: \"%s\"\n", unescapeCharsInString(defined_in.c_str()).data());
 }
 static void printNumberOfConditionalPaths(MemberDef* md) {
   printf("          conditional_paths: %d\n", md->numberOfFlowKeyWords());
@@ -167,35 +176,32 @@ static int isPartOfCStruct(MemberDef * md) {
   return is_c_code && md->getClassDef() != NULL;
 }
 
-std::string removeDoubleQuotes(std::string data) {
-  // remove surrounding double quotes
-  if (data.front() == '"' && data.back() == '"') {
-    data.erase(0, 1);            // first double quote
-    data.erase(data.size() - 1); // last double quote
-  }
-  return data;
+std::string sanitizeString(std::string data) {
+  QCString new_data = QCString(data.c_str());
+  new_data.replace(QRegExp("\""), "");
+  new_data.replace(QRegExp("\\"), ""); // https://github.com/analizo/analizo/issues/138
+  return !new_data.isEmpty() ? new_data.data() : "";
 }
 
-std::string argumentData(Argument *argument) {
+std::string argumentData(const Argument &argument) {
   std::string data = "";
-  if (argument->type != NULL)
-    data = removeDoubleQuotes(argument->type.data());
-  else if (argument->name != NULL)
-    data = removeDoubleQuotes(argument->name.data());
+  if (argument.type.size() > 1)
+    data = sanitizeString(argument.type.data());
+  else if (!argument.name.isEmpty())
+    data = sanitizeString(argument.name.data());
   return data;
 }
 
 std::string functionSignature(MemberDef* md) {
-  std::string signature = md->name().data();
+  std::string signature = sanitizeString(md->name().data());
   if(md->isFunction()){
-    ArgumentList *argList = md->argumentList();
-    ArgumentListIterator iterator(*argList);
+    const ArgumentList &argList = md->argumentList();
     signature += "(";
-    Argument * argument = iterator.toFirst();
-    if(argument != NULL) {
-      signature += argumentData(argument);
-      for(++iterator; (argument = iterator.current()); ++iterator){
-        signature += std::string(",") + argumentData(argument);
+    auto it = argList.begin();
+    if(it!=argList.end()) {
+      signature += argumentData(*it);
+      for(++it; it!=argList.end(); ++it) {
+        signature += std::string(",") + argumentData(*it);
       }
     }
     signature += ")";
@@ -219,6 +225,9 @@ static void referenceTo(MemberDef* md) {
     else if (md->getFileDef()) {
       defined_in = md->getFileDef()->getOutputFileBase().data();
     }
+    else if (md->getNamespaceDef()) {
+      defined_in = md->getNamespaceDef()->name().data();
+    }
   }
   printReferenceTo(type, signature, defined_in);
 }
@@ -226,6 +235,12 @@ static void referenceTo(MemberDef* md) {
 void cModule(ClassDef* cd) {
   MemberList* ml = cd->getMemberList(MemberListType_variableMembers);
   if (ml) {
+    FileDef *fd = cd->getFileDef();
+    MemberList *fd_ml = fd->getMemberList(MemberListType_allMembersList);
+    if (!fd_ml || fd_ml->count() == 0) {
+      printModule(fd->getOutputFileBase().data());
+      printDefines();
+    }
     MemberListIterator mli(*ml);
     MemberDef* md;
     for (mli.toFirst(); (md=mli.current()); ++mli) {
@@ -237,11 +252,35 @@ void cModule(ClassDef* cd) {
   }
 }
 
+static bool checkOverrideArg(const ArgumentList &argList, MemberDef *md) {
+  if(!md->isFunction() || argList.empty()){
+    return false;
+  }
+
+  for (const Argument &argument : argList) {
+    if(md->name() == argument.name) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void functionInformation(MemberDef* md) {
+  std::string temp = "";
   int size = md->getEndBodyLine() - md->getStartBodyLine() + 1;
   printNumberOfLines(size);
-  ArgumentList *argList = md->argumentList();
-  printNumberOfArguments(argList->count());
+  const ArgumentList &argList = md->argumentList();
+  if (!argList.empty())
+  {
+    temp = argumentData(argList.front());
+// TODO: This is a workaround; better not include "void" in argList, in the first place. 
+    if (temp!="void")
+    {
+      printNumberOfArguments(argList.size());
+    }
+  }
+
   printNumberOfConditionalPaths(md);
   MemberSDict *defDict = md->getReferencesMembers();
   if (defDict) {
@@ -249,7 +288,7 @@ void functionInformation(MemberDef* md) {
     MemberDef *rmd;
     printUses();
     for (msdi.toFirst(); (rmd=msdi.current()); ++msdi) {
-      if (rmd->definitionType() == Definition::TypeMember && !ignoreStaticExternalCall(md, rmd)) {
+      if (rmd->definitionType() == Definition::TypeMember && !ignoreStaticExternalCall(md, rmd) && !checkOverrideArg(argList, rmd)) {
         referenceTo(rmd);
       }
     }
@@ -258,7 +297,7 @@ void functionInformation(MemberDef* md) {
 
 static void lookupSymbol(Definition *d) {
   if (d->definitionType() == Definition::TypeMember) {
-    MemberDef *md = (MemberDef *)d;
+    MemberDef *md = dynamic_cast<MemberDef*>(d);
     std::string type = md->memberTypeName().data();
     std::string signature = functionSignature(md);
     printDefinition(type, signature, md->getDefLine());
@@ -275,7 +314,6 @@ void listMembers(MemberList *ml) {
   if (ml) {
     MemberListIterator mli(*ml);
     MemberDef *md;
-    printDefines();
     for (mli.toFirst(); (md=mli.current()); ++mli) {
       lookupSymbol((Definition*) md);
     }
@@ -298,6 +336,7 @@ static void classInformation(ClassDef* cd) {
     printModule(cd->name().data());
     BaseClassList* baseClasses = cd->baseClasses();
     if (baseClasses) {
+      printInherits();
       BaseClassListIterator bci(*baseClasses);
       BaseClassDef* bcd;
       for (bci.toFirst(); (bcd = bci.current()); ++bci) {
@@ -307,6 +346,7 @@ static void classInformation(ClassDef* cd) {
     if(cd->isAbstract()) {
       printClassInformation("abstract class");
     }
+    printDefines();
     listAllMembers(cd);
   }
 }
@@ -355,6 +395,7 @@ static void listSymbols() {
       MemberList *ml = fd->getMemberList(MemberListType_allMembersList);
       if (ml && ml->count() > 0) {
         printModule(fd->getOutputFileBase().data());
+        printDefines();
         listMembers(ml);
       }
 
@@ -363,7 +404,10 @@ static void listSymbols() {
         ClassSDict::Iterator cli(*classes);
         ClassDef *cd;
         for (cli.toFirst(); (cd = cli.current()); ++cli) {
-          classInformation(cd);
+          if (!cd->isVisited()) {
+            classInformation(cd);
+            cd->setVisited(TRUE);
+          }
         }
       }
     }
@@ -375,6 +419,11 @@ int main(int argc,char **argv) {
   if (argc < 2) {
     printf("Usage: %s [source_file | source_dir]\n",argv[0]);
     exit(1);
+  }
+  if (qstrcmp(&argv[1][2], "version") == 0) {
+    QCString versionString = getVersion();
+    printf("%s\n", versionString.data());
+    exit(0);
   }
 
   // initialize data structures
@@ -388,7 +437,12 @@ int main(int argc,char **argv) {
 
   // we need a place to put intermediate files
   std::ostringstream tmpdir;
-  tmpdir << "/tmp/doxyparse-" << getpid();
+#if !defined(_WIN32) || defined(__CYGWIN__)
+  unsigned int pid = (uint)getpid();
+#else
+  unsigned int pid = (uint)GetCurrentProcessId();
+#endif
+  tmpdir << "/tmp/doxyparse-" << pid;
   Config_getString(OUTPUT_DIRECTORY)= tmpdir.str().c_str();
   // enable HTML (fake) output to omit warning about missing output format
   Config_getBool(GENERATE_HTML)=TRUE;
@@ -405,6 +459,7 @@ int main(int argc,char **argv) {
   Config_getBool(EXTRACT_STATIC)=TRUE;
   Config_getBool(EXTRACT_PRIVATE)=TRUE;
   Config_getBool(EXTRACT_LOCAL_METHODS)=TRUE;
+  Config_getBool(EXTRACT_PACKAGE)=TRUE;
   // Extract source browse information, needed
   // to make doxygen gather the cross reference info
   Config_getBool(SOURCE_BROWSER)=TRUE;
@@ -412,6 +467,18 @@ int main(int argc,char **argv) {
   Config_getBool(CALL_GRAPH)=TRUE;
   // loop recursive over input files
   Config_getBool(RECURSIVE)=TRUE;
+  // add file extensions
+  Config_getList(FILE_PATTERNS).append("*.cc");
+  Config_getList(FILE_PATTERNS).append("*.cxx");
+  Config_getList(FILE_PATTERNS).append("*.cpp");
+  Config_getList(FILE_PATTERNS).append("*.java");
+  Config_getList(FILE_PATTERNS).append("*.py");
+  Config_getList(FILE_PATTERNS).append("*.pyw");
+  Config_getList(FILE_PATTERNS).append("*.cs");
+  Config_getList(FILE_PATTERNS).append("*.c");
+  Config_getList(FILE_PATTERNS).append("*.h");
+  Config_getList(FILE_PATTERNS).append("*.hh");
+  Config_getList(FILE_PATTERNS).append("*.hpp");
   // set the input
   Config_getList(INPUT).clear();
   for (int i = 1; i < argc; i++) {
@@ -449,12 +516,16 @@ int main(int argc,char **argv) {
     }
   }
 
+  QDir thisDir;
   // remove temporary files
-  if (!Doxygen::objDBFileName.isEmpty()) unlink(Doxygen::objDBFileName);
-  if (!Doxygen::entryDBFileName.isEmpty()) unlink(Doxygen::entryDBFileName);
-  // clean up after us
-  rmdir(Config_getString(OUTPUT_DIRECTORY));
+  if (!Doxygen::objDBFileName.isEmpty())    thisDir.remove(Doxygen::objDBFileName);
+  if (!Doxygen::entryDBFileName.isEmpty())  thisDir.remove(Doxygen::entryDBFileName);
+  if (!Doxygen::filterDBFileName.isEmpty()) thisDir.remove(Doxygen::filterDBFileName);
 
+  // clean up after us
+  thisDir.rmdir(Config_getString(OUTPUT_DIRECTORY));
+
+  startYamlDocument();
   listSymbols();
 
   std::string cleanup_command = "rm -rf ";

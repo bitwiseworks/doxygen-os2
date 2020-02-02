@@ -90,7 +90,7 @@ void initWarningFormat()
 
   if (!Config_getString(WARN_LOGFILE).isEmpty())
   {
-    warnFile = portable_fopen(Config_getString(WARN_LOGFILE),"w");
+    warnFile = Portable::fopen(Config_getString(WARN_LOGFILE),"w");
   }
   if (!warnFile) // point it to something valid, because warn() relies on it
   {
@@ -167,17 +167,29 @@ static void format_warn(const char *file,int line,const char *text)
 static void do_warn(bool enabled, const char *file, int line, const char *prefix, const char *fmt, va_list args)
 {
   if (!enabled) return; // warning type disabled
-  const int bufSize = 40960;
-  char text[bufSize];
+
+  va_list argsCopy;
+  va_copy(argsCopy, args);
+
   int l=0;
   if (prefix)
   {
-    qstrncpy(text,prefix,bufSize);
     l=strlen(prefix);
   }
-  vsnprintf(text+l, bufSize-l, fmt, args);
+  // determine needed buffersize based on:
+  // format + arguments
+  // prefix
+  // 1 position for `\0`
+  int bufSize = vsnprintf(NULL, 0, fmt, args) + l + 1;
+  char *text = (char *)malloc(sizeof(char) * bufSize);
+  if (prefix)
+  {
+    qstrncpy(text,prefix,bufSize);
+  }
+  vsnprintf(text+l, bufSize-l, fmt, argsCopy);
   text[bufSize-1]='\0';
   format_warn(file,line,text);
+  free(text);
 }
 
 void warn(const char *file,int line,const char *fmt, ...)
@@ -237,6 +249,20 @@ extern void err_full(const char *file,int line,const char *fmt, ...)
   va_start(args, fmt);
   do_warn(TRUE, file, line, error_str, fmt, args);
   va_end(args);
+}
+
+void term(const char *fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  vfprintf(warnFile, (QCString(error_str) + fmt).data(), args);
+  va_end(args);
+  if (warnFile != stderr)
+  {
+    for (int i = 0; i < strlen(error_str); i++) fprintf(warnFile, " ");
+    fprintf(warnFile, "%s\n", "Exiting...");
+  }
+  exit(1);
 }
 
 void printlex(int dbg, bool enter, const char *lexName, const char *fileName)

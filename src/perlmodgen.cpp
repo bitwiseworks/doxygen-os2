@@ -388,8 +388,6 @@ public:
   void visitPost(DocXRefItem *);
   void visitPre(DocInternalRef *);
   void visitPost(DocInternalRef *);
-  void visitPre(DocCopy *);
-  void visitPost(DocCopy *);
   void visitPre(DocText *);
   void visitPost(DocText *);
   void visitPre(DocHtmlBlockQuote *);
@@ -641,8 +639,11 @@ void PerlModDocVisitor::visit(DocStyleChange *s)
   switch (s->style())
   {
     case DocStyleChange::Bold:          style = "bold"; break;
+    case DocStyleChange::S:             style = "s"; break;
     case DocStyleChange::Strike:        style = "strike"; break;
+    case DocStyleChange::Del:           style = "del"; break;
     case DocStyleChange::Underline:     style = "underline"; break;
+    case DocStyleChange::Ins:           style = "ins"; break;
     case DocStyleChange::Italic:        style = "italic"; break;
     case DocStyleChange::Code:          style = "code"; break;
     case DocStyleChange::Subscript:     style = "subscript"; break;
@@ -729,6 +730,7 @@ void PerlModDocVisitor::visit(DocInclude *inc)
 #endif
     return;
   case DocInclude::DontInclude:	return;
+  case DocInclude::DontIncWithLines: return;
   case DocInclude::HtmlInclude:	type = "htmlonly"; break;
   case DocInclude::LatexInclude: type = "latexonly"; break;
   case DocInclude::VerbInclude:	type = "preformatted"; break;
@@ -748,7 +750,7 @@ void PerlModDocVisitor::visit(DocInclude *inc)
 void PerlModDocVisitor::visit(DocIncOperator *)
 {
 #if 0
-  //printf("DocIncOperator: type=%d first=%d, last=%d text=`%s'\n",
+  //printf("DocIncOperator: type=%d first=%d, last=%d text='%s'\n",
   //    op->type(),op->isFirst(),op->isLast(),op->text().data());
   if (op->isFirst())
   {
@@ -1384,14 +1386,6 @@ void PerlModDocVisitor::visitPost(DocInternalRef *)
   closeItem();
 }
 
-void PerlModDocVisitor::visitPre(DocCopy *)
-{
-}
-
-void PerlModDocVisitor::visitPost(DocCopy *)
-{
-}
-
 void PerlModDocVisitor::visitPre(DocText *)
 {
 }
@@ -1429,23 +1423,20 @@ void PerlModDocVisitor::visitPost(DocParBlock *)
 }
 
 
-static void addTemplateArgumentList(ArgumentList *al,PerlModOutput &output,const char *)
+static void addTemplateArgumentList(const ArgumentList &al,PerlModOutput &output,const char *)
 {
-  if (!al)
-    return;
+  if (!al.hasParameters()) return;
   output.openList("template_parameters");
-  ArgumentListIterator ali(*al);
-  Argument *a;
-  for (ali.toFirst();(a=ali.current());++ali)
+  for (const Argument &a : al)
   {
     output.openHash();
-    if (!a->type.isEmpty())
-      output.addFieldQuotedString("type", a->type);
-    if (!a->name.isEmpty())
-      output.addFieldQuotedString("declaration_name", a->name)
-	.addFieldQuotedString("definition_name", a->name);
-    if (!a->defval.isEmpty())
-      output.addFieldQuotedString("default", a->defval);
+    if (!a.type.isEmpty())
+      output.addFieldQuotedString("type", a.type);
+    if (!a.name.isEmpty())
+      output.addFieldQuotedString("declaration_name", a.name)
+	.addFieldQuotedString("definition_name", a.name);
+    if (!a.defval.isEmpty())
+      output.addFieldQuotedString("default", a.defval);
     output.closeHash();
   }
   output.closeList();
@@ -1461,7 +1452,7 @@ static void addMemberTemplateLists(MemberDef *md,PerlModOutput &output)
 }
 #endif
 
-static void addTemplateList(ClassDef *cd,PerlModOutput &output)
+static void addTemplateList(const ClassDef *cd,PerlModOutput &output)
 {
   addTemplateArgumentList(cd->templateArguments(),output,cd->name());
 }
@@ -1470,8 +1461,8 @@ static void addPerlModDocBlock(PerlModOutput &output,
 			    const char *name,
 			    const QCString &fileName,
 			    int lineNr,
-			    Definition *scope,
-			    MemberDef *md,
+			    const Definition *scope,
+			    const MemberDef *md,
 			    const QCString &text)
 {
   QCString stext = text.stripWhiteSpace();
@@ -1542,14 +1533,14 @@ public:
 
   inline PerlModGenerator(bool pretty) : m_output(pretty) { }
 
-  void generatePerlModForMember(MemberDef *md, Definition *);
-  void generatePerlModSection(Definition *d, MemberList *ml,
+  void generatePerlModForMember(const MemberDef *md, const Definition *);
+  void generatePerlModSection(const Definition *d, MemberList *ml,
 			      const char *name, const char *header=0);
-  void addListOfAllMembers(ClassDef *cd);
-  void generatePerlModForClass(ClassDef *cd);
-  void generatePerlModForNamespace(NamespaceDef *nd);
-  void generatePerlModForFile(FileDef *fd);
-  void generatePerlModForGroup(GroupDef *gd);
+  void addListOfAllMembers(const ClassDef *cd);
+  void generatePerlModForClass(const ClassDef *cd);
+  void generatePerlModForNamespace(const NamespaceDef *nd);
+  void generatePerlModForFile(const FileDef *fd);
+  void generatePerlModForGroup(const GroupDef *gd);
   void generatePerlModForPage(PageDef *pi);
   
   bool createOutputFile(QFile &f, const char *s);
@@ -1566,7 +1557,7 @@ public:
   void generate();
 };
 
-void PerlModGenerator::generatePerlModForMember(MemberDef *md,Definition *)
+void PerlModGenerator::generatePerlModForMember(const MemberDef *md,const Definition *)
 {
   // + declaration/definition arg lists
   // + reimplements
@@ -1616,45 +1607,46 @@ void PerlModGenerator::generatePerlModForMember(MemberDef *md,Definition *)
       md->memberType()!=MemberType_Enumeration)
     m_output.addFieldQuotedString("type", md->typeString());
   
-  ArgumentList *al = md->argumentList();
+  const ArgumentList &al = md->argumentList();
   if (isFunc) //function
   {
-    m_output.addFieldBoolean("const", al!=0 && al->constSpecifier)
-      .addFieldBoolean("volatile", al!=0 && al->volatileSpecifier);
+    m_output.addFieldBoolean("const",    al.constSpecifier)
+            .addFieldBoolean("volatile", al.volatileSpecifier);
 
     m_output.openList("parameters");
-    ArgumentList *declAl = md->declArgumentList();
-    ArgumentList *defAl  = md->argumentList();
-    if (declAl && defAl && declAl->count()>0)
+    const ArgumentList &declAl = md->declArgumentList();
+    if (!declAl.empty())
     {
-      ArgumentListIterator declAli(*declAl);
-      ArgumentListIterator defAli(*defAl);
-      Argument *a;
-      for (declAli.toFirst();(a=declAli.current());++declAli)
+      auto defIt = al.begin();
+      for (const Argument &a : declAl)
       {
-	Argument *defArg = defAli.current();
+	const Argument *defArg = 0;
+        if (defIt!=al.end())
+        {
+          defArg = &(*defIt);
+          ++defIt;
+        }
 	m_output.openHash();
 
-	if (!a->name.isEmpty())
-	  m_output.addFieldQuotedString("declaration_name", a->name);
+	if (!a.name.isEmpty())
+	  m_output.addFieldQuotedString("declaration_name", a.name);
 
-	if (defArg && !defArg->name.isEmpty() && defArg->name!=a->name)
+	if (defArg && !defArg->name.isEmpty() && defArg->name!=a.name)
 	  m_output.addFieldQuotedString("definition_name", defArg->name);
 
-	if (!a->type.isEmpty())
-	  m_output.addFieldQuotedString("type", a->type);
+	if (!a.type.isEmpty())
+	  m_output.addFieldQuotedString("type", a.type);
 
-	if (!a->array.isEmpty())
-	  m_output.addFieldQuotedString("array", a->array);
+	if (!a.array.isEmpty())
+	  m_output.addFieldQuotedString("array", a.array);
 
-	if (!a->defval.isEmpty())
-	  m_output.addFieldQuotedString("default_value", a->defval);
+	if (!a.defval.isEmpty())
+	  m_output.addFieldQuotedString("default_value", a.defval);
 
-	if (!a->attrib.isEmpty())
-	  m_output.addFieldQuotedString("attributes", a->attrib);
+	if (!a.attrib.isEmpty())
+	  m_output.addFieldQuotedString("attributes", a.attrib);
 	
 	m_output.closeHash();
-	if (defArg) ++defAli;
       }
     }
     m_output.closeList();
@@ -1663,12 +1655,10 @@ void PerlModGenerator::generatePerlModForMember(MemberDef *md,Definition *)
 	   md->argsString()!=0) // define
   {
     m_output.openList("parameters");
-    ArgumentListIterator ali(*al);
-    Argument *a;
-    for (ali.toFirst();(a=ali.current());++ali)
+    for (const Argument &a : al)
     {
       m_output.openHash()
-	.addFieldQuotedString("name", a->type)
+	.addFieldQuotedString("name", a.type)
 	.closeHash();
     }
     m_output.closeList();
@@ -1686,12 +1676,12 @@ void PerlModGenerator::generatePerlModForMember(MemberDef *md,Definition *)
   
   if (md->memberType()==MemberType_Enumeration) // enum
   {
-    MemberList *enumFields = md->enumFieldList();
+    const MemberList *enumFields = md->enumFieldList();
     if (enumFields)
     {
       m_output.openList("values");
       MemberListIterator emli(*enumFields);
-      MemberDef *emd;
+      const MemberDef *emd;
       for (emli.toFirst();(emd=emli.current());++emli)
       {
 	m_output.openHash()
@@ -1710,7 +1700,7 @@ void PerlModGenerator::generatePerlModForMember(MemberDef *md,Definition *)
     }
   }
 
-  MemberDef *rmd = md->reimplements();
+  const MemberDef *rmd = md->reimplements();
   if (rmd)
     m_output.openHash("reimplements")
       .addFieldQuotedString("name", rmd->name())
@@ -1731,7 +1721,7 @@ void PerlModGenerator::generatePerlModForMember(MemberDef *md,Definition *)
   m_output.closeHash();
 }
 
-void PerlModGenerator::generatePerlModSection(Definition *d,
+void PerlModGenerator::generatePerlModSection(const Definition *d,
 					      MemberList *ml,const char *name,const char *header)
 {
   if (ml==0) return; // empty list
@@ -1743,7 +1733,7 @@ void PerlModGenerator::generatePerlModSection(Definition *d,
   
   m_output.openList("members");
   MemberListIterator mli(*ml);
-  MemberDef *md;
+  const MemberDef *md;
   for (mli.toFirst();(md=mli.current());++mli)
   {
     generatePerlModForMember(md,d);
@@ -1752,7 +1742,7 @@ void PerlModGenerator::generatePerlModSection(Definition *d,
     .closeHash();
 }
 
-void PerlModGenerator::addListOfAllMembers(ClassDef *cd)
+void PerlModGenerator::addListOfAllMembers(const ClassDef *cd)
 {
   m_output.openList("all_members");
   if (cd->memberNameInfoSDict())
@@ -1765,9 +1755,9 @@ void PerlModGenerator::addListOfAllMembers(ClassDef *cd)
       MemberInfo *mi;
       for (mii.toFirst();(mi=mii.current());++mii)
       {
-        MemberDef *md=mi->memberDef;
-        ClassDef  *cd=md->getClassDef();
-        Definition *d=md->getGroupDef();
+        const MemberDef *md=mi->memberDef;
+        const ClassDef  *cd=md->getClassDef();
+        const Definition *d=md->getGroupDef();
         if (d==0) d = cd;
 
         m_output.openHash()
@@ -1786,7 +1776,7 @@ void PerlModGenerator::addListOfAllMembers(ClassDef *cd)
   m_output.closeList();
 }
 
-void PerlModGenerator::generatePerlModForClass(ClassDef *cd)
+void PerlModGenerator::generatePerlModForClass(const ClassDef *cd)
 {
   // + brief description
   // + detailed description
@@ -1803,9 +1793,9 @@ void PerlModGenerator::generatePerlModForClass(ClassDef *cd)
   // + standard member sections
   // + detailed member documentation
   // - examples using the class
-  
+
   if (cd->isReference())        return; // skip external references.
-  if (cd->name().find('@')!=-1) return; // skip anonymous compounds.
+  if (cd->isAnonymous())        return; // skip anonymous compounds.
   if (cd->templateMaster()!=0)  return; // skip generated template instances.
 
   m_output.openHash()
@@ -1844,7 +1834,7 @@ void PerlModGenerator::generatePerlModForClass(ClassDef *cd)
   {
     m_output.openList("inner");
     ClassSDict::Iterator cli(*cl);
-    ClassDef *cd;
+    const ClassDef *cd;
     for (cli.toFirst();(cd=cli.current());++cli)
       m_output.openHash()
 	.addFieldQuotedString("name", cd->name())
@@ -1936,7 +1926,7 @@ void PerlModGenerator::generatePerlModForClass(ClassDef *cd)
   m_output.closeHash();
 }
 
-void PerlModGenerator::generatePerlModForNamespace(NamespaceDef *nd)
+void PerlModGenerator::generatePerlModForNamespace(const NamespaceDef *nd)
 {
   // + contained class definitions
   // + contained namespace definitions
@@ -1957,7 +1947,7 @@ void PerlModGenerator::generatePerlModForNamespace(NamespaceDef *nd)
   {
     m_output.openList("classes");
     ClassSDict::Iterator cli(*cl);
-    ClassDef *cd;
+    const ClassDef *cd;
     for (cli.toFirst();(cd=cli.current());++cli)
       m_output.openHash()
 	.addFieldQuotedString("name", cd->name())
@@ -1965,12 +1955,12 @@ void PerlModGenerator::generatePerlModForNamespace(NamespaceDef *nd)
     m_output.closeList();
   }
 
-  NamespaceSDict *nl = nd->getNamespaceSDict();
+  const NamespaceSDict *nl = nd->getNamespaceSDict();
   if (nl)
   {
     m_output.openList("namespaces");
     NamespaceSDict::Iterator nli(*nl);
-    NamespaceDef *nd;
+    const NamespaceDef *nd;
     for (nli.toFirst();(nd=nli.current());++nli)
       m_output.openHash()
 	.addFieldQuotedString("name", nd->name())
@@ -1981,7 +1971,7 @@ void PerlModGenerator::generatePerlModForNamespace(NamespaceDef *nd)
   if (nd->getMemberGroupSDict())
   {
     MemberGroupSDict::Iterator mgli(*nd->getMemberGroupSDict());
-    MemberGroup *mg;
+    const MemberGroup *mg;
     for (;(mg=mgli.current());++mgli)
       generatePerlModSection(nd,mg->members(),"user-defined",mg->header());
   }
@@ -1999,7 +1989,7 @@ void PerlModGenerator::generatePerlModForNamespace(NamespaceDef *nd)
   m_output.closeHash();
 }
 
-void PerlModGenerator::generatePerlModForFile(FileDef *fd)
+void PerlModGenerator::generatePerlModForFile(const FileDef *fd)
 {
   // + includes files
   // + includedby files
@@ -2068,7 +2058,7 @@ void PerlModGenerator::generatePerlModForFile(FileDef *fd)
   m_output.closeHash();
 }
 
-void PerlModGenerator::generatePerlModForGroup(GroupDef *gd)
+void PerlModGenerator::generatePerlModForGroup(const GroupDef *gd)
 {
   // + members
   // + member groups
@@ -2093,7 +2083,7 @@ void PerlModGenerator::generatePerlModForGroup(GroupDef *gd)
   {
     m_output.openList("files");
     QListIterator<FileDef> fli(*fl);
-    FileDef *fd;
+    const FileDef *fd;
     for (fli.toFirst();(fd=fli.current());++fli)
       m_output.openHash()
 	.addFieldQuotedString("name", fd->name())
@@ -2106,7 +2096,7 @@ void PerlModGenerator::generatePerlModForGroup(GroupDef *gd)
   {
     m_output.openList("classes");
     ClassSDict::Iterator cli(*cl);
-    ClassDef *cd;
+    const ClassDef *cd;
     for (cli.toFirst();(cd=cli.current());++cli)
       m_output.openHash()
 	.addFieldQuotedString("name", cd->name())
@@ -2119,7 +2109,7 @@ void PerlModGenerator::generatePerlModForGroup(GroupDef *gd)
   {
     m_output.openList("namespaces");
     NamespaceSDict::Iterator nli(*nl);
-    NamespaceDef *nd;
+    const NamespaceDef *nd;
     for (nli.toFirst();(nd=nli.current());++nli)
       m_output.openHash()
 	.addFieldQuotedString("name", nd->name())
@@ -2145,7 +2135,7 @@ void PerlModGenerator::generatePerlModForGroup(GroupDef *gd)
   {
     m_output.openList("groups");
     GroupListIterator gli(*gl);
-    GroupDef *sgd;
+    const GroupDef *sgd;
     for (gli.toFirst();(sgd=gli.current());++gli)
       m_output.openHash()
 	.addFieldQuotedString("title", sgd->groupTitle())
@@ -2206,14 +2196,14 @@ bool PerlModGenerator::generatePerlModOutput()
   
   m_output.openList("classes");
   ClassSDict::Iterator cli(*Doxygen::classSDict);
-  ClassDef *cd;
+  const ClassDef *cd;
   for (cli.toFirst();(cd=cli.current());++cli)
     generatePerlModForClass(cd);
   m_output.closeList();
 
   m_output.openList("namespaces");
   NamespaceSDict::Iterator nli(*Doxygen::namespaceSDict);
-  NamespaceDef *nd;
+  const NamespaceDef *nd;
   for (nli.toFirst();(nd=nli.current());++nli)
     generatePerlModForNamespace(nd);
   m_output.closeList();
@@ -2224,7 +2214,7 @@ bool PerlModGenerator::generatePerlModOutput()
   for (;(fn=fnli.current());++fnli)
   {
     FileNameIterator fni(*fn);
-    FileDef *fd;
+    const FileDef *fd;
     for (;(fd=fni.current());++fni)
       generatePerlModForFile(fd);
   }
@@ -2232,7 +2222,7 @@ bool PerlModGenerator::generatePerlModOutput()
 
   m_output.openList("groups");
   GroupSDict::Iterator gli(*Doxygen::groupSDict);
-  GroupDef *gd;
+  const GroupDef *gd;
   for (;(gd=gli.current());++gli)
   {
     generatePerlModForGroup(gd);
@@ -2282,13 +2272,12 @@ bool PerlModGenerator::createOutputDir(QDir &perlModDir)
       dir.setPath(QDir::currentDirPath());
       if (!dir.mkdir(outputDirectory))
       {
-	err("tag OUTPUT_DIRECTORY: Output directory `%s' does not "
+	term("tag OUTPUT_DIRECTORY: Output directory '%s' does not "
 	    "exist and cannot be created\n",outputDirectory.data());
-	exit(1);
       }
       else
       {
-	msg("Notice: Output directory `%s' does not exist. "
+	msg("Notice: Output directory '%s' does not exist. "
 	    "I have created it for you.\n", outputDirectory.data());
       }
       dir.cd(outputDirectory);

@@ -25,7 +25,6 @@
 #include "htmlattrib.h"
 
 class Definition;
-class MemberGroup;
 
 enum Tokens
 {
@@ -71,9 +70,7 @@ enum Tokens
 /** @brief Data associated with a token used by the comment block parser. */
 struct TokenInfo
 {
-  // unknown token
-  char unknownChar;
-  
+  TokenInfo() : isEnumList(FALSE), indent(0), id(-1), endTag(FALSE), emptyTag(FALSE), paramDir(Unspecified) {}
   // command token
   QCString name;
 
@@ -83,8 +80,8 @@ struct TokenInfo
   // comment blocks
   
   // list token info
-  bool isEnumList;
-  int indent;
+  bool isEnumList = false;
+  int indent = 0;
 
   // sections
   QCString sectionId;
@@ -97,22 +94,23 @@ struct TokenInfo
   QCString verb;
 
   // xrefitem
-  int id;
+  int id = -1;
 
   // html tag
   HtmlAttribList attribs;
-  bool endTag;
-  bool emptyTag;
+  bool endTag = false;
+  bool emptyTag = false;
+  QCString attribsStr;
 
   // whitespace
   QCString chars;
 
   // url
-  bool isEMailAddr;
+  bool isEMailAddr = false;
 
   // param attributes
   enum ParamDir { In=1, Out=2, InOut=3, Unspecified=0 };
-  ParamDir paramDir;
+  ParamDir paramDir = Unspecified;
 };
 
 // globals
@@ -124,8 +122,8 @@ extern FILE *doctokenizerYYin;
 const char *tokToString(int token);
 
 // operations on the scanner
-void doctokenizerYYFindSections(const char *input,Definition *d,
-                                MemberGroup *mg,const char *fileName);
+void doctokenizerYYFindSections(const char *input,const Definition *d,
+                                const char *fileName);
 void doctokenizerYYinit(const char *input,const char *fileName);
 void doctokenizerYYcleanup();
 void doctokenizerYYpushContext();
