@@ -91,8 +91,7 @@ DotManager::DotManager() : m_runners(1009), m_filePatchers(1009)
   int i;
   int dotNumThreads = Config_getInt(DOT_NUM_THREADS);
 #ifdef __OS2__ // multiworker is somehow not working for us :(
-  if (dornumThreads == 0)
-    dotnumThreads = 1;
+  dotNumThreads = 1;
 #endif
   if (dotNumThreads!=1)
   {
