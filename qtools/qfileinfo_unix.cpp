@@ -120,7 +120,7 @@ QString QFileInfo::readLink() const
 {
     QString r;
 
-#if defined(_OS_UNIX_) && !defined(_OS_OS2EMX_)
+#if defined(_OS_UNIX_)
     char s[PATH_MAX+1];
     if ( !isSymLink() )
 	return QString();

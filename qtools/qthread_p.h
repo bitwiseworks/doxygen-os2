@@ -44,7 +44,7 @@
 
 #include "qglobal.h"
 
-#if defined(_OS_UNIX_) || defined(_OS_MAC_) || defined(__OS2__)
+#if defined(_OS_UNIX_) || defined(_OS_MAC_)
 #include <pthread.h>
 #elif defined(_OS_WIN32_)
 #include <windows.h>
@@ -67,7 +67,7 @@ public:
     bool terminated;
     uint stackSize;
 
-#if defined(_OS_UNIX_) || defined(_OS_MAC_) || defined(__OS2__)
+#if defined(_OS_UNIX_) || defined(_OS_MAC_)
     pthread_t thread_id;
     QWaitCondition thread_done;
     static void *start(void *arg);
