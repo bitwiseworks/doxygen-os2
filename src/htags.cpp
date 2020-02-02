@@ -89,9 +89,13 @@ bool Htags::execute(const QCString &htmldir)
   QCString oldDir = QDir::currentDirPath().utf8();
   QDir::setCurrent(g_inputDir.absPath());
   //printf("CommandLine=[%s]\n",commandLine.data());
-  portable_sysTimerStart();
-  bool result=portable_system("htags",commandLine,FALSE)==0;
-  portable_sysTimerStop();
+  Portable::sysTimerStart();
+  bool result=Portable::system("htags",commandLine,FALSE)==0;
+  if (!result)
+  {
+    err("Problems running %s. Check your installation\n", "htags");
+  }
+  Portable::sysTimerStop();
   QDir::setCurrent(oldDir);
   return result;
 }
@@ -128,7 +132,7 @@ bool Htags::loadFilemap(const QCString &htmlDir)
       int len;
       while ((len=f.readLine(line.rawData(),maxlen))>0)
       {
-        line.resize(len+1);
+        line.at(len)='\0';
         //printf("Read line: %s",line.data());
         int sep = line.find('\t');
         if (sep!=-1)

@@ -17,7 +17,7 @@
  */
 
 /**
- @todo - continutation lines not always recognized
+ @todo - continuation lines not always recognized
        - merging of use-statements with same module name and different only-names
        - rename part of use-statement
        - links to interface functions 
@@ -140,7 +140,7 @@ static int	     g_yyLineNr;        //!< current line number
 static int	     g_contLineNr;      //!< current, local, line number for continuation determination
 static int	    *g_hasContLine = NULL;     //!< signals whether or not a line has a continuation line (fixed source form)
 static bool          g_needsTermination;
-static Definition   *g_searchCtx;
+static const Definition *g_searchCtx;
 static bool          g_collectXRefs;
 static bool          g_isFixedForm;
 
@@ -165,6 +165,8 @@ static int 	     bracketCount = 0;
 static int           inTypeDecl = 0;
 
 static bool      g_endComment;
+
+static const char *stateToString(int state);
 
 static void endFontClass()
 {
@@ -269,7 +271,7 @@ static void endCodeLine()
   g_code->endCodeLine();
 }
 
-/*! write a code fragment `text' that may span multiple lines, inserting
+/*! write a code fragment 'text' that may span multiple lines, inserting
  * line numbers for each line.
  */
 static void codifyLines(char *text)
@@ -381,7 +383,7 @@ static bool getFortranNamespaceDefs(const QCString &mname,
   @param tname the name of the type
   @param moduleName name of enclosing module or null, if global entry
   @param cd the entry, if found or null
-  @param useDict dictionary of data of USE-statement
+  @param usedict dictionary of data of USE-statement
   @returns true, if type is found 
 */
 static bool getFortranTypeDefs(const QCString &tname, const QCString &moduleName, 
@@ -452,16 +454,16 @@ static bool getFortranDefs(const QCString &memberName, const QCString &moduleNam
       MemberNameIterator mli(*mn);
       for (mli.toFirst();(md=mli.current());++mli) // all found functions with given name
       {
-        FileDef  *fd=md->getFileDef();
-        GroupDef *gd=md->getGroupDef();
-        ClassDef *cd=md->getClassDef();
+        const FileDef  *fd=md->getFileDef();
+        const GroupDef *gd=md->getGroupDef();
+        const ClassDef *cd=md->getClassDef();
 
  //cout << "found link with same name: " << fd->fileName() << "  " <<  memberName;
  //if (md->getNamespaceDef() != 0) cout << " in namespace " << md->getNamespaceDef()->name();cout << endl;
 
         if ((gd && gd->isLinkable()) || (fd && fd->isLinkable()))
         {
-           NamespaceDef *nspace= md->getNamespaceDef();
+           const NamespaceDef *nspace= md->getNamespaceDef();
 
            if (nspace == 0) 
 	   { // found function in global scope
@@ -519,7 +521,7 @@ static bool getGenericProcedureLink(const ClassDef *cd,
   return FALSE;
 }
 
-static bool getLink(UseSDict *usedict, // dictonary with used modules
+static bool getLink(UseSDict *usedict, // dictionary with used modules
                     const char *memberText,  // exact member text
 		    CodeOutputInterface &ol,
 		    const char *text)
@@ -532,8 +534,8 @@ static bool getLink(UseSDict *usedict, // dictonary with used modules
     if (md->isVariable() && (md->getLanguage()!=SrcLangExt_Fortran)) return FALSE; // Non Fortran variables aren't handled yet,
                                                                                    // see also linkifyText in util.cpp
 
-    Definition *d = md->getOuterScope()==Doxygen::globalScope ?
-	            md->getBodyDef() : md->getOuterScope();
+    const Definition *d = md->getOuterScope()==Doxygen::globalScope ?
+	                  md->getBodyDef() : md->getOuterScope();
     if (md->getGroupDef()) d = md->getGroupDef();
     if (d && d->isLinkable())
     {
@@ -750,6 +752,10 @@ LANGUAGE_BIND_SPEC BIND{BS}"("{BS}C{BS}(,{BS}NAME{BS}"="{BS}"\""(.*)"\""{BS})?")
                                           {
                                             if ((yy_my_start == 1) && ((yytext[0] == 'c') || (yytext[0] == 'C'))) YY_FTN_REJECT;
                                           }
+                                          if (g_currentMemberDef && g_currentMemberDef->isFunction())
+                                          {
+                                            g_currentMemberDef->incrementFlowKeyWordCount();
+                                          }
    					  /* font class is defined e.g. in doxygen.css */
   					  startFontClass("keywordflow");
   					  codifyLines(yytext);
@@ -934,7 +940,7 @@ LANGUAGE_BIND_SPEC BIND{BS}"("{BS}C{BS}(,{BS}NAME{BS}"="{BS}"\""(.*)"\""{BS})?")
                                           yy_pop_state();
                                           YY_FTN_RESET
                                         }
-<Start>^{BS}"end"{BS}("block"{BS}"data"|{SUBPROG}|"module"|"program"|"enum"|"type"|"interface")?{BS}     {  // Fortran subroutine or function ends
+<Start>"end"{BS}("block"{BS}"data"|{SUBPROG}|"module"|"program"|"enum"|"type"|"interface")?{BS}     {  // Fortran subroutine or function ends
                                           //cout << "===> end function " << yytext << endl;
                                           endScope();
    					  startFontClass("keyword");
@@ -943,11 +949,11 @@ LANGUAGE_BIND_SPEC BIND{BS}"("{BS}C{BS}(,{BS}NAME{BS}"="{BS}"\""(.*)"\""{BS})?")
                                           yy_push_state(YY_START);
                                           BEGIN(Subprogend);
                                         }
-<Subprogend>{ID}/{BS}(\n|!)             {
+<Subprogend>{ID}/{BS}(\n|!|;)             {
 					  generateLink(*g_code,yytext);
                                           yy_pop_state();
                                         }
-<Start>^{BS}"end"{BS}("block"{BS}"data"|{SUBPROG}|"module"|"program"|"enum"|"type"|"interface"){BS}/(\n|!) {  // Fortran subroutine or function ends
+<Start>"end"{BS}("block"{BS}"data"|{SUBPROG}|"module"|"program"|"enum"|"type"|"interface"){BS}/(\n|!|;) {  // Fortran subroutine or function ends
                                           //cout << "===> end function " << yytext << endl;
                                           endScope();
    					  startFontClass("keyword");
@@ -965,7 +971,7 @@ LANGUAGE_BIND_SPEC BIND{BS}"("{BS}C{BS}(,{BS}NAME{BS}"="{BS}"\""(.*)"\""{BS})?")
 <Start>{TYPE_SPEC}/[,:( ]               { 
                                           QCString typ = yytext;
                                           typ = removeRedundantWhiteSpace(typ.lower());
-                                          if (QString(typ).startsWith("real")) YY_FTN_REJECT;
+                                          if (typ.startsWith("real")) YY_FTN_REJECT;
                                           if (typ == "type" || typ == "class" || typ == "procedure") inTypeDecl = 1;
                                           yy_push_state(YY_START);
 					  BEGIN(Declaration);
@@ -1244,7 +1250,7 @@ LANGUAGE_BIND_SPEC BIND{BS}"("{BS}C{BS}(,{BS}NAME{BS}"="{BS}"\""(.*)"\""{BS})?")
                                           else
                                           {
                                             codifyLines(yytext);
-                                            // comment cannot extend over the end of a line so should always be terminatd at the end of the line.
+                                            // comment cannot extend over the end of a line so should always be terminated at the end of the line.
                                             if (g_currentFontClass && !strcmp(g_currentFontClass,"comment")) endFontClass();
                                           }
 					  g_contLineNr++;
@@ -1313,21 +1319,16 @@ static void checkContLines(const char *s)
   g_hasContLine[0] = 0;
 }
 
-void parseFortranCode(CodeOutputInterface &od,const char *className,const QCString &s, 
+void parseFortranCode(CodeOutputInterface &od,const char *,const QCString &s, 
                   bool exBlock, const char *exName,FileDef *fd,
 		  int startLine,int endLine,bool inlineFragment,
-		  MemberDef *memberDef,bool,Definition *searchCtx,
+		  const MemberDef *,bool,const Definition *searchCtx,
                   bool collectXRefs, FortranFormat format)
 {
   //printf("***parseCode() exBlock=%d exName=%s fd=%p\n",exBlock,exName,fd);
 
-  // used parameters
-  (void)memberDef;
-  (void)className;
-
   if (s.isEmpty()) return;
   printlex(yy_flex_debug, TRUE, __FILE__, fd ? fd->fileName().data(): NULL);
-  TooltipManager::instance()->clearTooltips();
   g_code = &od;
   g_inputString   = s;
   g_inputPosition = 0;
@@ -1358,7 +1359,7 @@ void parseFortranCode(CodeOutputInterface &od,const char *className,const QCStri
   if (exBlock && fd==0)
   {
     // create a dummy filedef for the example
-    g_sourceFileDef = new FileDef("",exName);
+    g_sourceFileDef = createFileDef("",exName);
   }
   if (g_sourceFileDef) 
   {
@@ -1382,10 +1383,6 @@ void parseFortranCode(CodeOutputInterface &od,const char *className,const QCStri
     endFontClass();
     g_code->endCodeLine();
   }
-  if (fd)
-  {
-    TooltipManager::instance()->writeTooltips(*g_code);
-  }
   if (exBlock && g_sourceFileDef)
   {
     // delete the temporary file definition used for this example
@@ -1398,15 +1395,34 @@ void parseFortranCode(CodeOutputInterface &od,const char *className,const QCStri
   return;
 }
 
-#if !defined(YY_FLEX_SUBMINOR_VERSION)
-extern "C" { // some bogus code to keep the compiler happy
-  void fortrancodeYYdummy() { yy_flex_realloc(0,0); }
-}
-#elif YY_FLEX_MAJOR_VERSION<=2 && YY_FLEX_MINOR_VERSION<=5 && YY_FLEX_SUBMINOR_VERSION<33
-#error "You seem to be using a version of flex newer than 2.5.4 but older than 2.5.33. These versions do NOT work with doxygen! Please use version <=2.5.4 or >=2.5.33 or expect things to be parsed wrongly!"
-#else
-extern "C" { // some bogus code to keep the compiler happy
-  void fortrancodeYYdummy() { yy_top_state(); } 
-}
-#endif
+//---------------------------------------------------------
 
+void FortranCodeParser::parseCode(CodeOutputInterface & codeOutIntf,
+                   const char * scopeName,
+                   const QCString & input,
+                   SrcLangExt /*lang*/,
+                   bool isExampleBlock,
+                   const char * exampleName,
+                   FileDef * fileDef,
+                   int startLine,
+                   int endLine,
+                   bool inlineFragment,
+		   const MemberDef *memberDef,
+                   bool showLineNumbers,
+                   const Definition *searchCtx,
+                   bool collectXRefs
+                  )
+{
+  ::parseFortranCode(codeOutIntf,scopeName,input,isExampleBlock,exampleName,
+                     fileDef,startLine,endLine,inlineFragment,memberDef,
+                     showLineNumbers,searchCtx,collectXRefs,m_format);
+}
+
+void FortranCodeParser::resetCodeParserState()
+{
+  ::resetFortranCodeParserState();
+}
+
+//---------------------------------------------------------
+
+#include "fortrancode.l.h"

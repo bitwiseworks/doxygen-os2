@@ -33,15 +33,15 @@ class RTFGenerator : public OutputGenerator
     static void writeExtensionsFile(QFile &file);
 
     void enable() 
-    { if (genStack->top()) active=*genStack->top(); else active=TRUE; }
-    void disable() { active=FALSE; }
+    { if (m_genStack->top()) m_active=*m_genStack->top(); else m_active=TRUE; }
+    void disable() { m_active=FALSE; }
     void enableIf(OutputType o)  { if (o==RTF) enable();  }
     void disableIf(OutputType o) { if (o==RTF) disable(); }
     void disableIfNot(OutputType o) { if (o!=RTF) disable(); }
-    bool isEnabled(OutputType o) { return (o==RTF && active); } 
+    bool isEnabled(OutputType o) { return (o==RTF && m_active); } 
     OutputGenerator *get(OutputType o) { return (o==RTF) ? this : 0; }
 
-    void writeDoc(DocNode *,Definition *,MemberDef *);
+    void writeDoc(DocNode *,const Definition *,const MemberDef *);
 
     void startFile(const char *name,const char *manName,const char *title);
     void writeSearchInfo() {}
@@ -127,9 +127,9 @@ class RTFGenerator : public OutputGenerator
     void writeAnchor(const char *fileName,const char *name);
     void startCodeFragment();
     void endCodeFragment();
-    void writeLineNumber(const char *,const char *,const char *,int l) { t << QString("%1").arg(l,5) << " "; }
-    void startCodeLine(bool) { col=0; }
-    void endCodeLine() { lineBreak(); }
+    void writeLineNumber(const char *,const char *,const char *,int l);
+    void startCodeLine(bool);
+    void endCodeLine();
     void startEmphasis() { t << "{\\i ";  }
     void endEmphasis()   { t << "}"; }
     void startBold()     { t << "{\\b "; }
@@ -202,16 +202,16 @@ class RTFGenerator : public OutputGenerator
     void endDescTableData();
     
     void startDotGraph();
-    void endDotGraph(const DotClassGraph &);
+    void endDotGraph(DotClassGraph &);
     void startInclDepGraph();
-    void endInclDepGraph(const DotInclDepGraph &);
+    void endInclDepGraph(DotInclDepGraph &);
     void startGroupCollaboration();
-    void endGroupCollaboration(const DotGroupCollaboration &g);
+    void endGroupCollaboration(DotGroupCollaboration &g);
     void startCallGraph();
-    void endCallGraph(const DotCallGraph &);
+    void endCallGraph(DotCallGraph &);
     void startDirDepGraph();
-    void endDirDepGraph(const DotDirDeps &g);
-    void writeGraphicalHierarchy(const DotGfxHierarchyTable &) {}
+    void endDirDepGraph(DotDirDeps &g);
+    void writeGraphicalHierarchy(DotGfxHierarchyTable &) {}
 
     void startMemberGroupHeader(bool);
     void endMemberGroupHeader();
@@ -262,7 +262,7 @@ class RTFGenerator : public OutputGenerator
     void endFontClass();
 
     void writeCodeAnchor(const char *) {}
-    void setCurrentDoc(Definition *,const char *,bool) {}
+    void setCurrentDoc(const Definition *,const char *,bool) {}
     void addWord(const char *,bool) {}
 
     static bool preProcessFileInplace(const char *path,const char *name);
@@ -279,14 +279,14 @@ class RTFGenerator : public OutputGenerator
     const char *rtf_Code_DepthStyle();
     void incrementIndentLevel();
     void decrementIndentLevel();
-    int  col;
+    int  m_col;
     bool m_prettyCode;
 
     bool m_bstartedBody;  // has startbody been called yet?
-    int  m_listLevel; // // RTF does not really have a addative indent...manually set list level.
+    int  m_listLevel; // // RTF does not really have a additive indent...manually set list level.
     bool m_omitParagraph; // should a the next paragraph command be ignored?
     int  m_numCols; // number of columns in a table
-    QCString relPath;
+    QCString m_relPath;
 
     void beginRTFDocument();
     void beginRTFChapter();

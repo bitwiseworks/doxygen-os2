@@ -49,7 +49,7 @@ class LatexCodeGenerator : public CodeOutputInterface
     void startFontClass(const char *);
     void endFontClass();
     void writeCodeAnchor(const char *) {}
-    void setCurrentDoc(Definition *,const char *,bool) {}
+    void setCurrentDoc(const Definition *,const char *,bool) {}
     void addWord(const char *,bool) {}
     static void setDoxyCodeOpen(bool val);
 
@@ -82,12 +82,12 @@ class LatexGenerator : public OutputGenerator
     //OutputGenerator *clone() { return new LatexGenerator(*this); }
     //void append(const OutputGenerator *o);
     void enable() 
-    { if (genStack->top()) active=*genStack->top(); else active=TRUE; }
-    void disable() { active=FALSE; }
+    { if (m_genStack->top()) m_active=*m_genStack->top(); else m_active=TRUE; }
+    void disable() { m_active=FALSE; }
     void enableIf(OutputType o)  { if (o==Latex) enable();  }
     void disableIf(OutputType o) { if (o==Latex) disable(); }
     void disableIfNot(OutputType o) { if (o!=Latex) disable(); }
-    bool isEnabled(OutputType o) { return (o==Latex && active); } 
+    bool isEnabled(OutputType o) { return (o==Latex && m_active); } 
     OutputGenerator *get(OutputType o) { return (o==Latex) ? this : 0; }
 
     // --- CodeOutputInterface
@@ -116,7 +116,7 @@ class LatexGenerator : public OutputGenerator
     // ---------------------------
 
 
-    void writeDoc(DocNode *,Definition *ctx,MemberDef *);
+    void writeDoc(DocNode *,const Definition *ctx,const MemberDef *);
 
     void startFile(const char *name,const char *manName,const char *title);
     void writeSearchInfo() {}
@@ -273,16 +273,16 @@ class LatexGenerator : public OutputGenerator
     void lastIndexPage();
 
     void startDotGraph();
-    void endDotGraph(const DotClassGraph &);
+    void endDotGraph(DotClassGraph &);
     void startInclDepGraph();
-    void endInclDepGraph(const DotInclDepGraph &);
+    void endInclDepGraph(DotInclDepGraph &);
     void startCallGraph();
     void startGroupCollaboration();
-    void endGroupCollaboration(const DotGroupCollaboration &g);
-    void endCallGraph(const DotCallGraph &);
+    void endGroupCollaboration(DotGroupCollaboration &g);
+    void endCallGraph(DotCallGraph &);
     void startDirDepGraph();
-    void endDirDepGraph(const DotDirDeps &g);
-    void writeGraphicalHierarchy(const DotGfxHierarchyTable &) {}
+    void endDirDepGraph(DotDirDeps &g);
+    void writeGraphicalHierarchy(DotGfxHierarchyTable &) {}
 
     void startTextBlock(bool) {}
     void endTextBlock(bool) {}
@@ -321,17 +321,17 @@ class LatexGenerator : public OutputGenerator
     void writeLabel(const char *l,bool isLast);
     void endLabels();
 
-    void setCurrentDoc(Definition *,const char *,bool) {}
+    void setCurrentDoc(const Definition *,const char *,bool) {}
     void addWord(const char *,bool) {}
 
 
   private:
     LatexGenerator(const LatexGenerator &);
     LatexGenerator &operator=(const LatexGenerator &);
-    bool insideTabbing;
-    bool firstDescItem;
-    bool disableLinks;
-    QCString relPath;
+    bool m_insideTabbing;
+    bool m_firstDescItem;
+    bool m_disableLinks;
+    QCString m_relPath;
     int m_indent;
     bool templateMemberItem;
     bool m_prettyCode;

@@ -33,6 +33,11 @@
 #include "defargs.h"
 #include "outputgen.h"
 #include "dot.h"
+#include "dotcallgraph.h"
+#include "dotclassgraph.h"
+#include "dotdirdeps.h"
+#include "dotgroupcollaboration.h"
+#include "dotincldepgraph.h"
 #include "pagedef.h"
 #include "filename.h"
 #include "version.h"
@@ -153,7 +158,7 @@ void DocbookCodeGenerator::writeCodeLink(const char *ref,const char *file,
 {
   Docbook_DB(("(writeCodeLink)\n"));
   writeDocbookLink(m_t,ref,file,anchor,name,tooltip);
-  m_col+=strlen(name);
+  m_col+=(int)strlen(name);
 }
 void DocbookCodeGenerator::writeCodeLinkLine(const char *ref,const char *file,
     const char *anchor,const char *name,
@@ -164,7 +169,7 @@ void DocbookCodeGenerator::writeCodeLinkLine(const char *ref,const char *file,
   m_t << "_1l";
   writeDocbookString(m_t,name);
   m_t << "\"/>";
-  m_col+=strlen(name);
+  m_col+=(int)strlen(name);
 }
 void DocbookCodeGenerator::writeTooltip(const char *, const DocLinkInfo &, const char *,
                   const char *, const SourceLinkInfo &, const SourceLinkInfo &
@@ -180,7 +185,7 @@ void DocbookCodeGenerator::startCodeLine(bool)
 }
 void DocbookCodeGenerator::endCodeLine()
 {
-  m_t << endl;
+  if (m_insideCodeLine) m_t << endl;
   Docbook_DB(("(endCodeLine)\n"));
   m_lineNumber = -1;
   m_refId.resize(0);
@@ -228,9 +233,9 @@ void DocbookCodeGenerator::writeLineNumber(const char *ref,const char *fileName,
   {
     m_t << l << " ";
   }
-
+  m_col=0;
 }
-void DocbookCodeGenerator::setCurrentDoc(Definition *,const char *,bool)
+void DocbookCodeGenerator::setCurrentDoc(const Definition *,const char *,bool)
 {
 }
 void DocbookCodeGenerator::addWord(const char *,bool)
@@ -238,7 +243,7 @@ void DocbookCodeGenerator::addWord(const char *,bool)
 }
 void DocbookCodeGenerator::finish()
 {
-  if (m_insideCodeLine) endCodeLine();
+  endCodeLine();
 }
 void DocbookCodeGenerator::startCodeFragment()
 {
@@ -246,13 +251,16 @@ void DocbookCodeGenerator::startCodeFragment()
 }
 void DocbookCodeGenerator::endCodeFragment()
 {
+  //endCodeLine checks is there is still an open code line, if so closes it.
+  endCodeLine();
+
   m_t << "</computeroutput></literallayout>" << endl;
 }
 
 DocbookGenerator::DocbookGenerator() : OutputGenerator()
 {
 DB_GEN_C
-  dir=Config_getString(DOCBOOK_OUTPUT);
+  m_dir=Config_getString(DOCBOOK_OUTPUT);
   //insideTabbing=FALSE;
   //firstDescItem=TRUE;
   //disableLinks=FALSE;
@@ -281,8 +289,7 @@ void DocbookGenerator::init()
   QDir d(dir);
   if (!d.exists() && !d.mkdir(dir))
   {
-    err("Could not create output directory %s\n",dir.data());
-    exit(1);
+    term("Could not create output directory %s\n",dir.data());
   }
 
   createSubDirs(d);
@@ -537,7 +544,7 @@ DB_GEN_C2("IndexSections " << is)
       {
         t << "</title>" << endl;
         ClassSDict::Iterator cli(*Doxygen::classSDict);
-        ClassDef *cd=0;
+        const ClassDef *cd=0;
         bool found=FALSE;
         for (cli.toFirst();(cd=cli.current()) && !found;++cli)
         {
@@ -572,7 +579,7 @@ DB_GEN_C2("IndexSections " << is)
         for (fnli.toFirst();(fn=fnli.current());++fnli)
         {
           FileNameIterator fni(*fn);
-          FileDef *fd;
+          const FileDef *fd;
           for (;(fd=fni.current());++fni)
           {
             if (fd->isLinkableInProject())
@@ -635,7 +642,7 @@ DB_GEN_C
     if (!pd->getGroupDef() && !pd->isReference() && pd->name() == stripPath(name))
     {
       t << "<chapter>\n";
-      if (!pd->title().isEmpty())
+      if (pd->hasTitle())
       {
         t << "    <title>" << convertToDocBook(pd->title()) << "</title>" << endl;
       }
@@ -648,7 +655,7 @@ DB_GEN_C
     }
   }
 }
-void DocbookGenerator::writeDoc(DocNode *n,Definition *ctx,MemberDef *)
+void DocbookGenerator::writeDoc(DocNode *n,const Definition *ctx,const MemberDef *)
 {
 DB_GEN_C
   DocbookDocVisitor *visitor =
@@ -910,7 +917,7 @@ DB_GEN_C
   t << "                <imagedata width=\"50%\" align=\"center\" valign=\"middle\" scalefit=\"0\" fileref=\"" 
                          << relPath << fileName << ".png\">" << "</imagedata>" << endl;
   t << "            </imageobject>" << endl;
-  d.writeImage(t,dir,relPath,fileName,FALSE);
+  d.writeImage(t,m_dir,relPath,fileName,FALSE);
   t << "        </mediaobject>" << endl;
   t << "    </informalfigure>" << endl;
   t << "</para>" << endl;
@@ -1002,6 +1009,9 @@ DB_GEN_C
 void DocbookGenerator::endCodeFragment()
 {
 DB_GEN_C
+  //endCodeLine checks is there is still an open code line, if so closes it.
+  endCodeLine();
+
     t << "</programlisting>";
 }
 void DocbookGenerator::startMemberTemplateParams()
@@ -1095,46 +1105,46 @@ void DocbookGenerator::startGroupCollaboration()
 {
 DB_GEN_C
 }
-void DocbookGenerator::endGroupCollaboration(const DotGroupCollaboration &g)
+void DocbookGenerator::endGroupCollaboration(DotGroupCollaboration &g)
 {
 DB_GEN_C
-  g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT),fileName,relPath,FALSE);
+  g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT),m_fileName,relPath,FALSE);
 }
 void DocbookGenerator::startDotGraph()
 {
 DB_GEN_C
 }
-void DocbookGenerator::endDotGraph(const DotClassGraph &g)
+void DocbookGenerator::endDotGraph(DotClassGraph &g)
 {
 DB_GEN_C
-  g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT),fileName,relPath,TRUE,FALSE);
+  g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT),m_fileName,relPath,TRUE,FALSE);
 }
 void DocbookGenerator::startInclDepGraph()
 {
 DB_GEN_C
 }
-void DocbookGenerator::endInclDepGraph(const DotInclDepGraph &g)
+void DocbookGenerator::endInclDepGraph(DotInclDepGraph &g)
 {
 DB_GEN_C
-  QCString fn = g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT), fileName,relPath,FALSE);
+  QCString fn = g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT), m_fileName,relPath,FALSE);
 }
 void DocbookGenerator::startCallGraph()
 {
 DB_GEN_C
 }
-void DocbookGenerator::endCallGraph(const DotCallGraph &g)
+void DocbookGenerator::endCallGraph(DotCallGraph &g)
 {
 DB_GEN_C
-  QCString fn = g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT), fileName,relPath,FALSE);
+  QCString fn = g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT), m_fileName,relPath,FALSE);
 }
 void DocbookGenerator::startDirDepGraph()
 {
 DB_GEN_C
 }
-void DocbookGenerator::endDirDepGraph(const DotDirDeps &g)
+void DocbookGenerator::endDirDepGraph(DotDirDeps &g)
 {
 DB_GEN_C
-  QCString fn = g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT), fileName,relPath,FALSE);
+  QCString fn = g.writeGraph(t,GOF_BITMAP,EOF_DocBook,Config_getString(DOCBOOK_OUTPUT), m_fileName,relPath,FALSE);
 }
 void DocbookGenerator::startMemberDocList()
 {

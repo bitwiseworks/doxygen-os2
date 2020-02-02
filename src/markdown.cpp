@@ -51,6 +51,7 @@
 #include "config.h"
 #include "section.h"
 #include "message.h"
+#include "portable.h"
 
 //-----------
 
@@ -107,14 +108,9 @@ static action_t       g_actions[256];
 static Entry         *g_current;
 static QCString       g_fileName;
 static int            g_lineNr;
-
-// In case a markdown page starts with a level1 header, that header is used
-// as a title of the page, in effect making it a level0 header, so the
-// level of all other sections needs to be corrected as well.
-// This flag is TRUE if corrections are needed.
-//static bool           g_correctSectionLevel;
-
-
+static int            g_indentLevel=0;  // 0 is outside markdown, -1=page level
+static const char     g_utf8_nbsp[3] = {'\xc2', '\xa0', '\0'}; // UTF-8 nbsp
+static const char    *g_doxy_nsbp = "&_doxy_nbsp;";            // doxygen escape command for UTF-8 nbsp
 //----------
 
 const int codeBlockIndent = 4;
@@ -138,6 +134,7 @@ static QCString escapeSpecialChars(const QCString &s)
       case '>':  if (!insideQuote) { growBuf.addChar('\\'); } growBuf.addChar('>'); break;
       case '\\': if (!insideQuote) { growBuf.addChar('\\'); } growBuf.addChar('\\'); break;
       case '@':  if (!insideQuote) { growBuf.addChar('\\'); } growBuf.addChar('@'); break;
+      case '#':  if (!insideQuote) { growBuf.addChar('\\'); } growBuf.addChar('#'); break;
       default:   growBuf.addChar(c); break;
     }
     pc=c;
@@ -485,7 +482,7 @@ static int processNmdash(GrowBuf &out,const char *data,int off,int size)
   {
     count++;
   }
-  if (count==2 && off>=2 && qstrncmp(data-2,"<!",2)==0) return 0; // start HTML comment
+  if (count>=2 && off>=2 && qstrncmp(data-2,"<!",2)==0) return 1-count; // start HTML comment
   if (count==2 && (data[2]=='>')) return 0; // end HTML comment
   if (count==2 && (off<8 || qstrncmp(data-8,"operator",8)!=0)) // -- => ndash
   {
@@ -523,7 +520,7 @@ static int processQuoted(GrowBuf &out,const char *data,int,int size)
 /** Process a HTML tag. Note that <pre>..</pre> are treated specially, in
  *  the sense that all code inside is written unprocessed
  */
-static int processHtmlTag(GrowBuf &out,const char *data,int offset,int size)
+static int processHtmlTagWrite(GrowBuf &out,const char *data,int offset,int size,bool doWrite)
 {
   if (offset>0 && data[-1]=='\\') return 0; // escaped <
 
@@ -546,7 +543,7 @@ static int processHtmlTag(GrowBuf &out,const char *data,int offset,int size)
             tolower(data[i+2])=='p' && tolower(data[i+3])=='r' &&
             tolower(data[i+4])=='e' && tolower(data[i+5])=='>')
         { // found </pre> tag, copy from start to end of tag
-          out.addStr(data,i+6);
+          if (doWrite) out.addStr(data,i+6);
           //printf("found <pre>..</pre> [%d..%d]\n",0,i+6);
           return i+6;
         }
@@ -569,13 +566,13 @@ static int processHtmlTag(GrowBuf &out,const char *data,int offset,int size)
       if (data[i]=='/' && i<size-1 && data[i+1]=='>') // <bla/>
       {
         //printf("Found htmlTag={%s}\n",QCString(data).left(i+2).data());
-        out.addStr(data,i+2);
+        if (doWrite) out.addStr(data,i+2);
         return i+2;
       }
       else if (data[i]=='>') // <bla>
       {
         //printf("Found htmlTag={%s}\n",QCString(data).left(i+1).data());
-        out.addStr(data,i+1);
+        if (doWrite) out.addStr(data,i+1);
         return i+1;
       }
       else if (data[i]==' ') // <bla attr=...
@@ -595,7 +592,7 @@ static int processHtmlTag(GrowBuf &out,const char *data,int offset,int size)
           else if (!insideAttr && data[i]=='>') // found end of tag
           {
             //printf("Found htmlTag={%s}\n",QCString(data).left(i+1).data());
-            out.addStr(data,i+1);
+            if (doWrite) out.addStr(data,i+1);
             return i+1;
           }
           i++;
@@ -605,6 +602,10 @@ static int processHtmlTag(GrowBuf &out,const char *data,int offset,int size)
   }
   //printf("Not a valid html tag\n");
   return 0;
+}
+static int processHtmlTag(GrowBuf &out,const char *data,int offset,int size)
+{
+  return processHtmlTagWrite(out,data,offset,size,true);
 }
 
 static int processEmphasis(GrowBuf &out,const char *data,int offset,int size)
@@ -910,7 +911,7 @@ static int processLink(GrowBuf &out,const char *data,int,int size)
   {
     SrcLangExt lang = getLanguageFromFileName(link);
     int lp=-1;
-    if ((lp=link.find("@ref "))!=-1 || (lp=link.find("\\ref "))!=-1 || lang==SrcLangExt_Markdown) 
+    if ((lp=link.find("@ref "))!=-1 || (lp=link.find("\\ref "))!=-1 || (lang==SrcLangExt_Markdown && !isURL(link))) 
         // assume doxygen symbol link
     {
       if (lp==-1) // link to markdown page
@@ -980,7 +981,7 @@ static int processCodeSpan(GrowBuf &out, const char *data, int /*offset*/, int s
       nl++;
     }
     else if (data[end]=='\'' && nb==1 && (end==size-1 || (end<size-1 && !isIdChar(end+1))))
-    { // look for quoted strings like `some word', but skip strings like `it's cool`
+    { // look for quoted strings like 'some word', but skip strings like `it's cool`
       QCString textFragment;
       convertStringFragment(textFragment,data+nb,end-nb);
       out.addStr("&lsquo;");
@@ -1029,6 +1030,17 @@ static int processCodeSpan(GrowBuf &out, const char *data, int /*offset*/, int s
   return end;
 }
 
+static void addStrEscapeUtf8Nbsp(GrowBuf &out,const char *s,int len)
+{
+  if (Portable::strnstr(s,g_doxy_nsbp,len)==0) // no escape needed -> fast
+  {
+    out.addStr(s,len);
+  }
+  else // escape needed -> slow
+  {
+    out.addStr(substitute(QCString(s).left(len),g_doxy_nsbp,g_utf8_nbsp));
+  }
+}
 
 static int processSpecialCommand(GrowBuf &out, const char *data, int offset, int size)
 {
@@ -1045,7 +1057,7 @@ static int processSpecialCommand(GrowBuf &out, const char *data, int offset, int
         if (qstrncmp(&data[i+1],endBlockName,l)==0)
         {
           //printf("found end at %d\n",i);
-          out.addStr(data,i+1+l);
+          addStrEscapeUtf8Nbsp(out,data,i+1+l);
           return i+1+l;
         }
       }
@@ -1085,9 +1097,9 @@ static void processInline(GrowBuf &out,const char *data,int size)
     if (end>=size) break;
     i=end;
     end = action(out,data+i,i,size-i);
-    if (!end)
+    if (end<=0)
     {
-      end=i+1;
+      end=i+1-end;
     }
     else
     {
@@ -1098,7 +1110,7 @@ static void processInline(GrowBuf &out,const char *data,int size)
 }
 
 /** returns whether the line is a setext-style hdr underline */
-static int isHeaderline(const char *data, int size)
+static int isHeaderline(const char *data, int size, bool allowAdjustLevel)
 {
   int i=0, c=0;
   while (i<size && data[i]==' ') i++;
@@ -1108,14 +1120,24 @@ static int isHeaderline(const char *data, int size)
   {
     while (i<size && data[i]=='=') i++,c++;
     while (i<size && data[i]==' ') i++;
-    return (c>1 && (i>=size || data[i]=='\n')) ? 1 : 0;
+    int level = (c>1 && (i>=size || data[i]=='\n')) ? 1 : 0;
+    if (allowAdjustLevel && level==1 && g_indentLevel==-1)
+    {
+      // In case a page starts with a header line we use it as title, promoting it to @page.
+      // We set g_indentLevel to -1 to promoting the other sections if they have a deeper 
+      // nesting level than the page header, i.e. @section..@subsection becomes @page..@section.
+      // In case a section at the same level is found (@section..@section) however we need 
+      // to undo this (and the result will be @page..@section).
+      g_indentLevel=0;
+    }
+    return g_indentLevel+level;
   }
   // test of level 2 header
   if (data[i]=='-')
   {
     while (i<size && data[i]=='-') i++,c++;
     while (i<size && data[i]==' ') i++;
-    return (c>1 && (i>=size || data[i]=='\n')) ? 2 : 0;
+    return (c>1 && (i>=size || data[i]=='\n')) ? g_indentLevel+2 : 0;
   }
   return 0;
 }
@@ -1290,7 +1312,7 @@ static QCString extractTitleId(QCString &title, int level)
 
 
 static int isAtxHeader(const char *data,int size,
-                       QCString &header,QCString &id)
+                       QCString &header,QCString &id,bool allowAdjustLevel)
 {
   int i = 0, end;
   int level = 0, blanks=0;
@@ -1323,7 +1345,29 @@ static int isAtxHeader(const char *data,int size,
     header=header.left(i+1);
   }
 
-  return level;
+  if (allowAdjustLevel && level==1 && g_indentLevel==-1)
+  {
+    // in case we find a `# Section` on a markdown page that started with the same level
+    // header, we no longer need to artificially decrease the paragraph level.
+    // So both
+    // -------------------
+    // # heading 1    <-- here we set g_indentLevel to -1
+    // # heading 2    <-- here we set g_indentLevel back to 0 such that this will be a @section
+    // -------------------
+    // and
+    // -------------------
+    // # heading 1    <-- here we set  g_indentLevel to -1
+    // ## heading 2   <-- here we keep g_indentLevel at -1 such that @subsection will be @section
+    // -------------------
+    // will convert to
+    // -------------------
+    // @page md_page Heading 1
+    // @section autotoc_md1 Heading 2
+    // -------------------
+
+    g_indentLevel=0;
+  }
+  return level+g_indentLevel;
 }
 
 static int isEmptyLine(const char *data,int size)
@@ -1797,7 +1841,7 @@ static int writeTableBlock(GrowBuf &out,const char *data,int size)
   }
 
 
-  out.addStr("<table class=\"markdownTable\">\n");
+  out.addStr("<table class=\"markdownTable\">");
   QCString cellTag("th"), cellClass("class=\"markdownTableHead");
   for (unsigned row = 0; row < tableContents.size(); row++)
   {
@@ -1805,16 +1849,16 @@ static int writeTableBlock(GrowBuf &out,const char *data,int size)
     {
       if (row % 2)
       {
-        out.addStr("<tr class=\"markdownTableRowOdd\">\n");
+        out.addStr("<tr class=\"markdownTableRowOdd\">");
       }
       else
       {
-        out.addStr("<tr class=\"markdownTableRowEven\">\n");
+        out.addStr("<tr class=\"markdownTableRowEven\">");
       }
     }
     else
     {
-      out.addStr("  <tr class=\"markdownTableHead\">\n");
+      out.addStr("  <tr class=\"markdownTableHead\">");
     }
     for (int c = 0; c < columns; c++)
     {
@@ -1869,7 +1913,7 @@ static int writeTableBlock(GrowBuf &out,const char *data,int size)
       }
       // need at least one space on either side of the cell text in
       // order for doxygen to do other formatting
-      out.addStr("> " + cellText + " </" + cellTag + ">\n");
+      out.addStr("> " + cellText + "</" + cellTag + ">");
     }
     cellTag = "td";
     cellClass = "class=\"markdownTableBody";
@@ -1886,10 +1930,16 @@ static int writeTableBlock(GrowBuf &out,const char *data,int size)
 static int hasLineBreak(const char *data,int size)
 {
   int i=0;
-  while (i<size && data[i]!='\n') i++;
+  int j=0;
+  // search for end of line and also check if it is not a completely blank
+  while (i<size && data[i]!='\n')
+  {
+    if (data[i]!=' ' && data[i]!='\t') j++; // some non whitespace
+    i++;
+  }
   if (i>=size) return 0; // empty line
   if (i<2) return 0; // not long enough
-  return (data[i-1]==' ' && data[i-2]==' ');
+  return (j>0 && data[i-1]==' ' && data[i-2]==' '); // non blank line with at two spaces at the end
 }
 
 
@@ -1902,10 +1952,8 @@ void writeOneLineHeaderOrRuler(GrowBuf &out,const char *data,int size)
   {
     out.addStr("\n<hr>\n");
   }
-  else if ((level=isAtxHeader(data,size,header,id)))
+  else if ((level=isAtxHeader(data,size,header,id,TRUE)))
   {
-    //if (level==1) g_correctSectionLevel=FALSE;
-    //if (g_correctSectionLevel) level--;
     QCString hTag;
     if (level<5 && !id.isEmpty())
     {
@@ -1947,7 +1995,7 @@ void writeOneLineHeaderOrRuler(GrowBuf &out,const char *data,int size)
     out.addStr(data,size);
     if (hasLineBreak(data,size))
     {
-      out.addStr("\n");
+      out.addStr("<br>\n");
     }
   }
 }
@@ -1986,7 +2034,7 @@ static int writeBlockQuote(GrowBuf &out,const char *data,int size)
         out.addStr("<blockquote>\n");
       }
     }
-    else if (level<curLevel) // quote level descreased => add end markers
+    else if (level<curLevel) // quote level decreased => add end markers
     {
       for (l=level;l<curLevel;l++)
       {
@@ -2029,7 +2077,7 @@ static int writeCodeBlock(GrowBuf &out,const char *data,int size,int refIndent)
       emptyLines++;
       i=end;
     }
-    else if (indent>=refIndent+codeBlockIndent) // enough indent to contine the code block
+    else if (indent>=refIndent+codeBlockIndent) // enough indent to continue the code block
     {
       while (emptyLines>0) // write skipped empty lines
       {
@@ -2086,17 +2134,9 @@ static void findEndOfLine(GrowBuf &out,const char *data,int size,
           {
             if (qstrncmp(&data[end+1],endBlockName,l)==0)
             {
-              if (pi!=-1) // output previous line if available
-              {
-                //printf("feol out={%s}\n",QCString(data+pi).left(i-pi).data());
-                out.addStr(data+pi,i-pi);
-              }
               // found end marker, skip over this block
               //printf("feol.block out={%s}\n",QCString(data+i).left(end+l+1-i).data());
-              out.addStr(data+i,end+l+1-i);
-              pi=-1;
-              i=end+l+1; // continue after block
-              end=i+1;
+              end = end + l + 2;
               break;
             }
           }
@@ -2110,16 +2150,8 @@ static void findEndOfLine(GrowBuf &out,const char *data,int size,
       if (tolower(data[end])=='p' && tolower(data[end+1])=='r' &&
           tolower(data[end+2])=='e' && data[end+3]=='>') // <pre> tag
       {
-        if (pi!=-1) // output previous line if available
-        {
-          out.addStr(data+pi,i-pi);
-        }
-        // output part until <pre>
-        out.addStr(data+i,end-1-i); 
-        // output part until </pre>
-        i = end-1 + processHtmlTag(out,data+end-1,end-1,size-end+1);
-        pi=-1;
-        end = i+1;
+        // skip part until including </pre>
+        end  = end + processHtmlTagWrite(out,data+end-1,end-1,size-end+1,false) + 2;
         break;
       }
       else
@@ -2155,9 +2187,9 @@ static void writeFencedCodeBlock(GrowBuf &out,const char *data,const char *lng,
   {
     out.addStr("{"+lang+"}");
   }
-  out.addStr(data+blockStart,blockEnd-blockStart);
+  addStrEscapeUtf8Nbsp(out,data+blockStart,blockEnd-blockStart);
   out.addStr("\n");
-  out.addStr("@endcode");
+  out.addStr("@endcode\n");
 }
 
 static QCString processQuotations(const QCString &s,int refIndent)
@@ -2263,10 +2295,8 @@ static QCString processBlocks(const QCString &s,int indent)
       QCString lang;
       blockIndent = indent;
       //printf("isHeaderLine(%s)=%d\n",QCString(data+i).left(size-i).data(),level);
-      if ((level=isHeaderline(data+i,size-i))>0)
+      if ((level=isHeaderline(data+i,size-i,TRUE))>0)
       {
-        //if (level==1) g_correctSectionLevel=FALSE;
-        //if (g_correctSectionLevel) level--;
         //printf("Found header at %d-%d\n",i,end);
         while (pi<size && data[pi]==' ') pi++;
         QCString header,id;
@@ -2282,28 +2312,6 @@ static QCString processBlocks(const QCString &s,int indent)
             out.addStr(" ");
             out.addStr(header);
             out.addStr("\n\n");
-            SectionInfo *si = Doxygen::sectionDict->find(id);
-            if (si)
-            {
-              if (si->lineNr != -1)
-              {
-                warn(g_fileName,g_lineNr,"multiple use of section label '%s', (first occurrence: %s, line %d)",header.data(),si->fileName.data(),si->lineNr);
-              }
-              else
-              {
-                warn(g_fileName,g_lineNr,"multiple use of section label '%s', (first occurrence: %s)",header.data(),si->fileName.data());
-              }
-            }
-            else
-            {
-              si = new SectionInfo(g_fileName,g_lineNr,id,header,
-                      level==1 ? SectionInfo::Section : SectionInfo::Subsection,level);
-              if (g_current)
-              {
-                g_current->anchors->append(si);
-              }
-              Doxygen::sectionDict->append(id,si);
-            }
           }
           else
           {
@@ -2429,7 +2437,7 @@ static QCString extractPageTitle(QCString &docs,QCString &id)
     // second line form end1..end2
     int end2=end1+1;
     while (end2<size && data[end2-1]!='\n') end2++;
-    if (isHeaderline(data+end1,size-end1))
+    if (isHeaderline(data+end1,size-end1,FALSE))
     {
       convertStringFragment(title,data+i,end1-i-1);
       QCString lns;
@@ -2440,9 +2448,13 @@ static QCString extractPageTitle(QCString &docs,QCString &id)
       return title;
     }
   }
-  if (i<end1 && isAtxHeader(data+i,end1-i,title,id)>0)
+  if (i<end1 && isAtxHeader(data+i,end1-i,title,id,FALSE)>0)
   {
     docs=docs.mid(end1);
+  }
+  else
+  {
+    id = extractTitleId(title, 0);
   }
   //printf("extractPageTitle(title='%s' docs='%s' id='%s')\n",title.data(),docs.data(),id.data());
   return title;
@@ -2451,8 +2463,8 @@ static QCString extractPageTitle(QCString &docs,QCString &id)
 static QCString detab(const QCString &s,int &refIndent)
 {
   static int tabSize = Config_getInt(TAB_SIZE);
-  GrowBuf out;
   int size = s.length();
+  GrowBuf out(size);
   const char *data = s.data();
   int i=0;
   int col=0;
@@ -2471,7 +2483,7 @@ static QCString detab(const QCString &s,int &refIndent)
           while (stop--) out.addChar(' '); 
         }
         break;
-      case '\n': // reset colomn counter
+      case '\n': // reset column counter
         out.addChar(c);
         col=0;
         break;
@@ -2480,18 +2492,31 @@ static QCString detab(const QCString &s,int &refIndent)
         col++;
         break;
       default: // non-whitespace => update minIndent
-        out.addChar(c);
         if (c<0 && i<size) // multibyte sequence
         {
-          out.addChar(data[i++]); // >= 2 bytes
-          if (((uchar)c&0xE0)==0xE0 && i<size)
+          // special handling of the UTF-8 nbsp character 0xc2 0xa0
+          if (c == '\xc2' && data[i] == '\xa0')
           {
-            out.addChar(data[i++]); // 3 bytes
+            out.addStr(g_doxy_nsbp);
+            i++;
           }
-          if (((uchar)c&0xF0)==0xF0 && i<size)
+          else
           {
-            out.addChar(data[i++]); // 4 byres
+            out.addChar(c);
+            out.addChar(data[i++]); // >= 2 bytes
+            if (((uchar)c&0xE0)==0xE0 && i<size)
+            {
+              out.addChar(data[i++]); // 3 bytes
+            }
+              if (((uchar)c&0xF0)==0xF0 && i<size)
+            {
+              out.addChar(data[i++]); // 4 byres
+            }
           }
+        }
+        else
+        {
+          out.addChar(c);
         }
         if (col<minIndent) minIndent=col;
         col++;
@@ -2535,7 +2560,9 @@ QCString processMarkdown(const QCString &fileName,const int lineNr,Entry *e,cons
   out.clear();
   int refIndent;
   // for replace tabs by spaces
-  QCString s = detab(input,refIndent);
+  QCString s = input;
+  if (s.at(s.length()-1)!='\n') s += "\n"; // see PR #6766
+  s = detab(s,refIndent);
   //printf("======== DeTab =========\n---- output -----\n%s\n---------\n",s.data());
   // then process quotation blocks (as these may contain other blocks)
   s = processQuotations(s,refIndent);
@@ -2547,7 +2574,7 @@ QCString processMarkdown(const QCString &fileName,const int lineNr,Entry *e,cons
   processInline(out,s,s.length());
   out.addChar(0);
   Debug::print(Debug::Markdown,0,"======== Markdown =========\n---- input ------- \n%s\n---- output -----\n%s\n=========\n",qPrint(input),qPrint(out.get()));
-  return out.get();
+  return substitute(out.get(),g_doxy_nsbp,"&nbsp;");
 }
 
 //---------------------------------------------------------------------------
@@ -2561,13 +2588,14 @@ QCString markdownFileNameToId(const QCString &fileName)
   return "md_"+baseName;
 }
 
-void MarkdownFileParser::parseInput(const char *fileName, 
+
+void MarkdownOutlineParser::parseInput(const char *fileName, 
                 const char *fileBuf, 
-                Entry *root,
+                const std::shared_ptr<Entry> &root,
                 bool /*sameTranslationUnit*/,
                 QStrList & /*filesInSameTranslationUnit*/)
 {
-  Entry *current = new Entry;
+  std::shared_ptr<Entry> current = std::make_shared<Entry>();
   current->lang = SrcLangExt_Markdown;
   current->fileName = fileName;
   current->docFile  = fileName;
@@ -2575,6 +2603,8 @@ void MarkdownFileParser::parseInput(const char *fileName,
   QCString docs = fileBuf;
   QCString id;
   QCString title=extractPageTitle(docs,id).stripWhiteSpace();
+  if (id.startsWith("autotoc_md")) id = "";
+  g_indentLevel=title.isEmpty() ? 0 : -1;
   QCString titleFn = QFileInfo(fileName).baseName().utf8();
   QCString fn      = QFileInfo(fileName).fileName().utf8();
   static QCString mdfileAsMainPage = Config_getString(USE_MDFILE_AS_MAINPAGE);
@@ -2601,19 +2631,20 @@ void MarkdownFileParser::parseInput(const char *fileName,
     }
   }
   int lineNr=1;
-  int position=0;
 
   // even without markdown support enabled, we still 
   // parse markdown files as such
   bool markdownEnabled = Doxygen::markdownSupport;
   Doxygen::markdownSupport = TRUE;
 
-  bool needsEntry = FALSE;
   Protection prot=Public;
+  bool needsEntry = FALSE;
+  int position=0;
+  QCString processedDocs = preprocessCommentBlock(docs,fileName,lineNr);
   while (parseCommentBlock(
         this,
-        current,
-        docs,
+        current.get(),
+        processedDocs,
         fileName,
         lineNr,
         FALSE,     // isBrief
@@ -2626,8 +2657,7 @@ void MarkdownFileParser::parseInput(const char *fileName,
     if (needsEntry)
     {
       QCString docFile = current->docFile;
-      root->addSubEntry(current);
-      current = new Entry;
+      root->moveToSubEntryAndRefresh(current);
       current->lang = SrcLangExt_Markdown;
       current->docFile = docFile;
       current->docLine = lineNr;
@@ -2635,55 +2665,22 @@ void MarkdownFileParser::parseInput(const char *fileName,
   }
   if (needsEntry)
   {
-    root->addSubEntry(current);
+    root->moveToSubEntryAndKeep(current);
   }
 
   // restore setting
   Doxygen::markdownSupport = markdownEnabled;
-  //g_correctSectionLevel = FALSE;
+  g_indentLevel=0;
 }
 
-void MarkdownFileParser::parseCode(CodeOutputInterface &codeOutIntf,
-               const char *scopeName,
-               const QCString &input,
-               SrcLangExt lang,
-               bool isExampleBlock,
-               const char *exampleName,
-               FileDef *fileDef,
-               int startLine,
-               int endLine,
-               bool inlineFragment,
-               MemberDef *memberDef,
-               bool showLineNumbers,
-               Definition *searchCtx,
-               bool collectXRefs
-              )
+void MarkdownOutlineParser::parsePrototype(const char *text)
 {
-  ParserInterface *pIntf = Doxygen::parserManager->getParser("*.cpp");
-  if (pIntf!=this)
+  OutlineParserInterface &intf = Doxygen::parserManager->getOutlineParser("*.cpp");
+  if (&intf!=this)
   {
-    pIntf->parseCode(
-       codeOutIntf,scopeName,input,lang,isExampleBlock,exampleName,
-       fileDef,startLine,endLine,inlineFragment,memberDef,showLineNumbers,
-       searchCtx,collectXRefs);
+    intf.parsePrototype(text);
   }
 }
 
-void MarkdownFileParser::resetCodeParserState()
-{
-  ParserInterface *pIntf = Doxygen::parserManager->getParser("*.cpp");
-  if (pIntf!=this)
-  {
-    pIntf->resetCodeParserState();
-  }
-}
-
-void MarkdownFileParser::parsePrototype(const char *text)
-{
-  ParserInterface *pIntf = Doxygen::parserManager->getParser("*.cpp");
-  if (pIntf!=this)
-  {
-    pIntf->parsePrototype(text);
-  }
-}
+//------------------------------------------------------------------------
 
