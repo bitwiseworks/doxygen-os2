@@ -1,5 +1,8 @@
 #include "portable.h"
 
+#ifdef __OS2__
+#define __USE_GNU  //for strnlen
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 
